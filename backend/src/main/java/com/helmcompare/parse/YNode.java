@@ -17,6 +17,8 @@ public final class YNode {
     public final LinkedHashMap<String, YNode> map;
     public final Map<String, Integer> keyLines;
     public final List<YNode> seq;
+    /** Last 1-based line covered by this node (including nested content). */
+    public int endLine;
 
     private YNode(Kind kind, int line, String value) {
         this.kind = kind;

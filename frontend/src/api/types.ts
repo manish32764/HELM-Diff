@@ -294,3 +294,87 @@ export interface AnalysisSummary {
 export interface SourceView { path: string; lines: string[]; maskedLines: number[] }
 
 export interface SearchHit { app: string; evaluatedOn: string; chartId: string; result: ExpectationResult }
+
+// ───────────── folder comparison ─────────────
+
+export type FolderStatus = 'IDENTICAL' | 'LOGICALLY_IDENTICAL' | 'DIFFERS' | 'LEFT_ONLY' | 'RIGHT_ONLY'
+export type SideState = 'PRESENT' | 'EMPTY' | 'MISSING'
+
+export interface FolderNode {
+  name: string
+  path: string
+  dir: boolean
+  status: FolderStatus
+  leftState: SideState
+  rightState: SideState
+  reason?: string
+  differences: number
+  leftSize: number
+  rightSize: number
+  identical: number
+  logicallySame: number
+  differs: number
+  leftOnly: number
+  rightOnly: number
+  children?: FolderNode[]
+}
+
+export interface FolderSummary {
+  leftFolders: number
+  rightFolders: number
+  matchedFolders: number
+  leftOnlyFolders: number
+  rightOnlyFolders: number
+  identicalFolders: number
+  differentFolders: number
+  files: number
+  identicalFiles: number
+  logicallySameFiles: number
+  differentFiles: number
+  leftOnlyFiles: number
+  rightOnlyFiles: number
+}
+
+export interface FolderCompareInfo {
+  id: string
+  createdAt: string
+  leftName: string
+  rightName: string
+  leftLabel?: string
+  rightLabel?: string
+  summary: FolderSummary
+}
+
+export interface FolderCompare extends FolderCompareInfo {
+  root: FolderNode
+}
+
+export interface LogicalDiff {
+  id: string
+  kind: 'ADDED' | 'REMOVED' | 'CHANGED'
+  path: string
+  description: string
+  left?: string
+  right?: string
+  leftStart: number
+  leftEnd: number
+  rightStart: number
+  rightEnd: number
+}
+
+export interface FileView {
+  path: string
+  name: string
+  status: FolderStatus
+  reason: string
+  leftState: SideState
+  rightState: SideState
+  binary: boolean
+  leftLines?: string[]
+  rightLines?: string[]
+  differences: LogicalDiff[]
+  leftName: string
+  rightName: string
+  leftLabel?: string
+  rightLabel?: string
+}

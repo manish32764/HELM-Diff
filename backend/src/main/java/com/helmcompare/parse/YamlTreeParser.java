@@ -24,7 +24,11 @@ import java.util.List;
  */
 public final class YamlTreeParser {
 
-    public record Result(List<YNode> documents, List<String> warnings) {
+    /**
+     * @param ignoredLines 1-based lines that had to be skipped to parse the file
+     * @param failed       true when at least one document could not be parsed at all
+     */
+    public record Result(List<YNode> documents, List<String> warnings, List<Integer> ignoredLines, boolean failed) {
     }
 
     private static final int MAX_REPAIRS = 80;
@@ -35,14 +39,18 @@ public final class YamlTreeParser {
     public static Result parse(String fileName, String text) {
         List<YNode> docs = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        List<Integer> ignored = new ArrayList<>();
+        boolean[] failed = {false};
         String[] lines = text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         int start = 0;
         for (int i = 0; i <= lines.length; i++) {
             if (i < lines.length && !isSeparator(lines[i])) continue;
-            if (i > start) parseDocument(fileName, Arrays.copyOfRange(lines, start, i), start, docs, warnings);
+            if (i > start) {
+                parseDocument(fileName, Arrays.copyOfRange(lines, start, i), start, docs, warnings, ignored, failed);
+            }
             start = i + 1;
         }
-        return new Result(docs, warnings);
+        return new Result(docs, warnings, ignored, failed[0]);
     }
 
     private static boolean isSeparator(String line) {
@@ -50,7 +58,8 @@ public final class YamlTreeParser {
         return line.strip().equals("...");
     }
 
-    private static void parseDocument(String file, String[] lines, int offset, List<YNode> docs, List<String> warnings) {
+    private static void parseDocument(String file, String[] lines, int offset, List<YNode> docs, List<String> warnings,
+                                      List<Integer> allIgnored, boolean[] failed) {
         boolean empty = Arrays.stream(lines).allMatch(l -> l.isBlank() || l.stripLeading().startsWith("#"));
         if (empty) return;
         List<Integer> ignored = new ArrayList<>();
@@ -60,6 +69,7 @@ public final class YamlTreeParser {
                 if (node != null) docs.add(convert(node, offset, 0));
                 if (!ignored.isEmpty()) {
                     warnings.add(file + ": ignored " + ignored.size() + " unparseable line(s) " + summarize(ignored));
+                    allIgnored.addAll(ignored);
                 }
                 return;
             } catch (MarkedYAMLException e) {
@@ -73,6 +83,7 @@ public final class YamlTreeParser {
                 break;
             }
         }
+        failed[0] = true;
         warnings.add(file + ": could not parse the document starting at line " + (offset + 1));
     }
 
@@ -92,32 +103,49 @@ public final class YamlTreeParser {
 
     private static YNode convert(Node node, int offset, int depth) {
         int line = node.getStartMark().getLine() + offset + 1;
-        if (depth > 150) return YNode.nul(line);
+        if (depth > 150) {
+            YNode n = YNode.nul(line);
+            n.endLine = line;
+            return n;
+        }
         if (node instanceof AnchorNode anchor) return convert(anchor.getRealNode(), offset, depth + 1);
         if (node instanceof ScalarNode scalar) {
-            return Tag.NULL.equals(scalar.getTag()) ? YNode.nul(line) : YNode.scalar(line, scalar.getValue());
+            YNode n = Tag.NULL.equals(scalar.getTag()) ? YNode.nul(line) : YNode.scalar(line, scalar.getValue());
+            Mark end = scalar.getEndMark();
+            n.endLine = end == null ? line : Math.max(line, end.getLine() + offset + (end.getColumn() == 0 ? 0 : 1));
+            return n;
         }
         if (node instanceof SequenceNode sequence) {
             YNode out = YNode.seq(line);
-            for (Node child : sequence.getValue()) out.seq.add(convert(child, offset, depth + 1));
+            out.endLine = line;
+            for (Node child : sequence.getValue()) {
+                YNode c = convert(child, offset, depth + 1);
+                out.seq.add(c);
+                out.endLine = Math.max(out.endLine, c.endLine);
+            }
             return out;
         }
         if (node instanceof MappingNode mapping) {
             YNode out = YNode.map(line);
+            out.endLine = line;
             for (NodeTuple tuple : mapping.getValue()) {
                 Node keyNode = tuple.getKeyNode();
                 String key = keyNode instanceof ScalarNode ks ? ks.getValue() : "?";
                 YNode value = convert(tuple.getValueNode(), offset, depth + 1);
+                int keyLine = keyNode.getStartMark().getLine() + offset + 1;
+                out.endLine = Math.max(out.endLine, Math.max(keyLine, value.endLine));
                 if ("<<".equals(key) && value.isMap()) {
                     value.map.forEach((k, v) -> {
                         if (!out.has(k)) out.put(k, value.keyLine(k), v);
                     });
                     continue;
                 }
-                out.put(key, keyNode.getStartMark().getLine() + offset + 1, value);
+                out.put(key, keyLine, value);
             }
             return out;
         }
-        return YNode.nul(line);
+        YNode n = YNode.nul(line);
+        n.endLine = line;
+        return n;
     }
 }

@@ -1,35 +1,78 @@
+import { useEffect, useState } from 'react'
 import { SourceViewerProvider } from './components/SourceViewer'
 import { ToastProvider } from './components/ui'
 import { useRoute } from './lib/router'
 import { AnalysisPage } from './pages/AnalysisPage'
 import { ChartsPage } from './pages/ChartsPage'
+import { FileComparePage } from './pages/FileComparePage'
+import { FolderHomePage } from './pages/FolderHomePage'
+import { FolderTreePage } from './pages/FolderTreePage'
 import { HomePage } from './pages/HomePage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { DiffComparePage, FourChartPage, HistoryPage, PairwisePage } from './pages/SetupPages'
 
-const NAV = [
+interface NavItem {
+  to: string
+  icon: string
+  label: string
+  hint?: string
+}
+
+const NAV: { section: string | null; items: NavItem[] }[] = [
   { section: null, items: [
-    { to: '/', icon: '⌂', label: 'Overview' },
-    { to: '/charts', icon: '⎈', label: 'Chart library' },
+    { to: '/', icon: '⧉', label: 'Compare folders' },
   ] },
-  { section: 'Analyse', items: [
+  { section: 'Advanced analysis', items: [
+    { to: '/analyses', icon: '⌂', label: 'Overview' },
+    { to: '/charts', icon: '⎈', label: 'Chart library' },
     { to: '/compare', icon: '⇆', label: 'Two-chart diff', hint: 'A↔B' },
-    { to: '/diff-compare', icon: '⧉', label: 'Two-diff comparison', hint: '2 diffs' },
+    { to: '/diff-compare', icon: '◫', label: 'Two-diff comparison', hint: '2 diffs' },
     { to: '/four-chart', icon: '⊞', label: 'Four-chart analysis', hint: '4 charts' },
     { to: '/portfolio', icon: '▦', label: 'Portfolio', hint: 'all' },
-  ] },
-  { section: 'Audit', items: [
     { to: '/history', icon: '◷', label: 'History' },
   ] },
 ]
 
+const COLLAPSED_KEY = 'helm-compare:sidebar-collapsed'
+
 export default function App() {
   const route = useRoute()
   const first = route.segments[0] ?? ''
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0')
+    } catch {
+      // storage unavailable
+    }
+  }, [collapsed])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return
+      if (e.key === '[' && !e.ctrlKey && !e.metaKey && !e.altKey) setCollapsed((c) => !c)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const page = (() => {
     switch (first) {
-      case '': return <HomePage />
+      case '': return <FolderHomePage />
+      case 'folders':
+        return route.segments[2] === 'file'
+          ? <FileComparePage key={route.query.get('path') ?? ''} id={route.segments[1]} path={route.query.get('path') ?? ''}
+              initialDiff={route.query.get('diff') ?? undefined} />
+          : <FolderTreePage key={route.segments[1]} id={route.segments[1]} />
+      case 'analyses': return <HomePage />
       case 'charts': return <ChartsPage />
       case 'compare': return <PairwisePage key={route.query.toString()} route={route} />
       case 'diff-compare': return <DiffComparePage />
@@ -37,21 +80,29 @@ export default function App() {
       case 'portfolio': return <PortfolioPage />
       case 'history': return <HistoryPage />
       case 'analysis': return <AnalysisPage key={route.segments[1]} id={route.segments[1]} />
-      default: return <HomePage />
+      default: return <FolderHomePage />
     }
   })()
 
-  const activeFor = (to: string) => (to === '/' ? first === '' : `/${first}` === to)
-    || (first === 'analysis' && to === '/history')
+  const activeFor = (to: string) => {
+    if (to === '/') return first === '' || first === 'folders'
+    if (to === '/history') return first === 'history' || first === 'analysis'
+    return `/${first}` === to
+  }
+  const fill = first === 'folders'
 
   return (
     <ToastProvider>
       <SourceViewerProvider>
         <div className="app">
-          <nav className="sidebar">
+          <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+            <button className="sidebar-toggle" onClick={() => setCollapsed((c) => !c)}
+              title={collapsed ? 'Expand sidebar  [' : 'Collapse sidebar  ['} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+              {collapsed ? '›' : '‹'}
+            </button>
             <div className="brand">
               <div className="brand-mark">⎈</div>
-              <div>
+              <div className="brand-text">
                 <div className="brand-name">Helm Compare</div>
                 <div className="brand-sub">Configuration intelligence</div>
               </div>
@@ -60,17 +111,18 @@ export default function App() {
               <div key={i}>
                 {group.section && <div className="nav-section">{group.section}</div>}
                 {group.items.map((item) => (
-                  <a key={item.to} href={`#${item.to}`} className={`nav-item ${activeFor(item.to) ? 'active' : ''}`}>
+                  <a key={item.to} href={`#${item.to}`} title={item.label}
+                    className={`nav-item ${activeFor(item.to) ? 'active' : ''}`}>
                     <span className="nav-icon">{item.icon}</span>
-                    {item.label}
-                    {'hint' in item && <span className="nav-hint">{item.hint}</span>}
+                    <span className="nav-label">{item.label}</span>
+                    {item.hint && <span className="nav-hint">{item.hint}</span>}
                   </a>
                 ))}
               </div>
             ))}
-            <div className="sidebar-foot">Secret values are never shown — only how they are provided.</div>
+            <div className="sidebar-foot">Press [ to collapse or expand this panel.</div>
           </nav>
-          <main className="main">{page}</main>
+          <main className={`main ${fill ? 'fill' : ''}`}>{page}</main>
         </div>
       </SourceViewerProvider>
     </ToastProvider>

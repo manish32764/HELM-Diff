@@ -10,6 +10,22 @@ HELM-Compare/
 └── frontend/   React 19 · TypeScript · Vite 7      (light, Apple-inspired UI)
 ```
 
+## Compare two folders (home screen)
+
+1. Choose the **left** and **right** parent folders. Each contains one sub-folder per microservice with its Helm chart.
+2. Sub-folders with the same name are matched and every file is compared.
+3. The **tree view** shows both folders side by side (border in the middle, each side scrolls horizontally on its own):
+   `IDENTICAL`, `LOGICALLY SAME` (only ordering / spacing / quoting / comments differ), `DIFFERS`, `FILE EMPTY`,
+   `LEFT ONLY` / `RIGHT ONLY`, and `— does not exist —` on the missing side. Folders are **green** when every file is
+   identical, otherwise **yellow**.
+4. Click a file to open the **file-to-file view** (same window, *Back* returns to the tree). Both files are shown with
+   VS Code-style YAML / Helm colours. **Show logical differences** lists what really changed for Kubernetes; selecting a
+   difference highlights the exact lines on both sides (green = added, red = removed, amber = changed).
+   Keyboard: `n` / `p` next / previous difference, `Backspace` back, `[` collapse / expand the sidebar.
+5. Export any comparison to Excel, HTML or CSV (folders, files and every logical difference with line numbers).
+
+Hidden folders (such as `.git`), `node_modules`, `target` and files over 10 MB are skipped.
+
 ## Run with Docker (recommended)
 
 Requires Docker Desktop (running).

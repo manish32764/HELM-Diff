@@ -45,7 +45,7 @@ export function AnalysisPage({ id }: { id: string }) {
         actions={<>
           <Button onClick={() => setAuditOpen(true)}>Audit trail</Button>
           <Button onClick={() => setRerunOpen(true)}>↻ Re-run</Button>
-          <ExportMenu analysisId={record.id} />
+          <ExportMenu url={(f) => api.exportUrl(record.id, f)} />
         </>}
       />
       <div className="chips" style={{ marginBottom: 18 }}>

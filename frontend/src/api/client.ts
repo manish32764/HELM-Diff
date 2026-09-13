@@ -1,6 +1,33 @@
 import type {
-  AnalysisRecord, AnalysisSummary, ChartRecord, ConfigItem, Expectation, PortfolioRecord, SearchHit, SourceView,
+  AnalysisRecord, AnalysisSummary, ChartRecord, ConfigItem, Expectation, FileView, FolderCompare, FolderCompareInfo,
+  PortfolioRecord, SearchHit, SourceView,
 } from './types'
+
+/** Multipart upload with progress reporting (fetch cannot report upload progress). */
+export function uploadWithProgress<T>(url: string, form: FormData, onProgress: (fraction: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText) as T)
+        return
+      }
+      let message = `${xhr.status} ${xhr.statusText}`
+      try {
+        message = JSON.parse(xhr.responseText).message ?? message
+      } catch {
+        // not JSON
+      }
+      reject(new Error(message))
+    }
+    xhr.onerror = () => reject(new Error('The upload failed. Check that the backend is running.'))
+    xhr.send(form)
+  })
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -57,4 +84,11 @@ export const api = {
     request<SearchHit[]>(`/api/portfolios/${portfolioId}/search?differenceSetId=${differenceSetId}&entryId=${entryId}`),
 
   seed: () => request<Record<string, unknown>>('/api/demo/seed', { method: 'POST' }),
+
+  folderCompares: () => request<FolderCompareInfo[]>('/api/folder-compares'),
+  folderCompare: (id: string) => request<FolderCompare>(`/api/folder-compares/${id}`),
+  folderFile: (id: string, path: string) =>
+    request<FileView>(`/api/folder-compares/${id}/file?path=${encodeURIComponent(path)}`),
+  deleteFolderCompare: (id: string) => request<void>(`/api/folder-compares/${id}`, { method: 'DELETE' }),
+  folderExportUrl: (id: string, format: string) => `/api/folder-compares/${id}/export?format=${format}`,
 }

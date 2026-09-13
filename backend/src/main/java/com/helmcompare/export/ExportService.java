@@ -55,14 +55,14 @@ public class ExportService {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(ZoneId.systemDefault());
 
-    private static final Set<String> GREEN = Set.of("COMMON", "COMPLIANT", "CARRIED_FORWARD", "IMPLEMENTED", "CONSISTENT",
+    private static final Set<String> GREEN = Set.of("IDENTICAL", "LOGICALLY_IDENTICAL", "COMMON", "COMPLIANT", "CARRIED_FORWARD", "IMPLEMENTED", "CONSISTENT",
             "ALREADY_SATISFIED", "ALREADY_IN_BASELINE", "UNCHANGED", "SAME", "ACCEPTED");
     private static final Set<String> RED = Set.of("MISSING", "REQUIRES_CHANGE", "REQUIRES_CHANGES", "REMOVED", "UNEXPECTED",
             "INCONSISTENT", "NEEDS_CHANGE");
-    private static final Set<String> ORANGE = Set.of("CHANGED", "REVIEW", "REQUIRES_REVIEW", "CHANGED_IMPLEMENTATION",
+    private static final Set<String> ORANGE = Set.of("DIFFERS", "CHANGED", "REVIEW", "REQUIRES_REVIEW", "CHANGED_IMPLEMENTATION",
             "DIFFERENT_IMPLEMENTATION", "IMPLEMENTED_DIFFERENTLY", "CONSISTENT_WITH_REVIEW", "SIMILAR", "OPEN");
     private static final Set<String> BLUE = Set.of("ADDED", "NEW_PROD_CHANGE", "NEW_CHANGE", "VERSION_CHANGE", "PREPARATION");
-    private static final Set<String> PURPLE = Set.of("NO_LONGER_APPLICABLE", "POTENTIALLY_IRRELEVANT", "NO_LONGER_PRESENT",
+    private static final Set<String> PURPLE = Set.of("LEFT_ONLY", "RIGHT_ONLY", "NO_LONGER_APPLICABLE", "POTENTIALLY_IRRELEVANT", "NO_LONGER_PRESENT",
             "NOT_APPLICABLE", "UNDETERMINED", "DIFFERENT");
 
     private final ObjectMapper mapper;
@@ -474,6 +474,9 @@ public class ExportService {
             case "SECURITY_CONTEXT" -> "Security Context";
             case "REQUIRES_CHANGE" -> "Requires change";
             case "NEEDS_CHANGE" -> "Change required";
+            case "LOGICALLY_IDENTICAL" -> "Logically same";
+            case "LEFT_ONLY" -> "Only in left";
+            case "RIGHT_ONLY" -> "Only in right";
             default -> {
                 if (!code.equals(code.toUpperCase(Locale.ROOT)) || code.contains(" ")) yield code;
                 String s = code.replace('_', ' ').toLowerCase(Locale.ROOT);
