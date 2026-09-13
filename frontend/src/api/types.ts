@@ -360,6 +360,9 @@ export interface LogicalDiff {
   leftEnd: number
   rightStart: number
   rightEnd: number
+  /** Line to show on each side: the block's start, or where it would appear when it exists on the other side only. */
+  leftAnchor: number
+  rightAnchor: number
 }
 
 export type EnvSource = 'PLAIN' | 'EMPTY' | 'TEMPLATE' | 'AKEYLESS' | 'K8S_SECRET' | 'EXTERNAL_SECRET' | 'VAULT' | 'CONFIGMAP' | 'FIELD_REF'

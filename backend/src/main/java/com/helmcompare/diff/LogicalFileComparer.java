@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,7 +20,8 @@ import java.util.stream.Collectors;
 
 /**
  * Compares two files the way Kubernetes would see them. YAML (including Helm templates) is compared
- * as a structure: key order, list order (matched by name/identity), indentation, quoting and comments
+ * as a structure addressed by XPath-like paths — {@code spec.template.spec.containers[name=app].volumeMounts[name=config].mountPath}:
+ * key order, list order (items matched by name/identity, otherwise by content), indentation, quoting and comments
  * are not differences. Other text files are compared line by line ignoring spacing and line order.
  * Every difference carries the line ranges on both sides so it can be highlighted in the source.
  */
@@ -27,9 +29,13 @@ public final class LogicalFileComparer {
 
     public enum Status { IDENTICAL, LOGICALLY_IDENTICAL, DIFFERS }
 
-    /** Line numbers are 1-based; 0 means "no lines on this side". */
+    /**
+     * Line numbers are 1-based; 0 means "no lines on this side".
+     * {@code leftAnchor} / {@code rightAnchor} is the line to show on each side: the start of the block, or — when the
+     * block exists on the other side only — the line after which it would appear (0 when unknown).
+     */
     public record Diff(String id, String kind, String path, String description, String left, String right,
-                       int leftStart, int leftEnd, int rightStart, int rightEnd) {
+                       int leftStart, int leftEnd, int rightStart, int rightEnd, int leftAnchor, int rightAnchor) {
     }
 
     public record Result(Status status, String reason, List<Diff> diffs) {
@@ -38,6 +44,7 @@ public final class LogicalFileComparer {
     private static final List<String> IDENTITY_KEYS = List.of("name", "key", "containerPort", "topologyKey",
             "mountPath", "secretKey", "port", "path", "ip", "host");
     private static final Set<String> ORDERED_LISTS = Set.of("command", "args");
+    private static final double MIN_ITEM_SIMILARITY = 0.3;
     private static final long MAX_LCS_CELLS = 4_000_000L;
 
     private LogicalFileComparer() {
@@ -130,7 +137,8 @@ public final class LogicalFileComparer {
             YNode l = left.get(i);
             String label = documentLabel(l, i, multi);
             if (pairOf[i] < 0) {
-                c.add("REMOVED", label.isEmpty() ? "Document" : label, "Document removed", render(l), null, l.line, l.endLine, 0, 0);
+                c.add("REMOVED", label.isEmpty() ? "Document" : label, "Document removed", render(l), null,
+                        l.line, l.endLine, 0, 0, l.line, 1);
             } else {
                 YNode r = right.get(pairOf[i]);
                 compareNode(l, r, label.isEmpty() ? "" : label + " ›", l.line, r.line, c);
@@ -140,10 +148,11 @@ public final class LogicalFileComparer {
             if (used[j]) continue;
             YNode r = right.get(j);
             String label = documentLabel(r, j, multi);
-            c.add("ADDED", label.isEmpty() ? "Document" : label, "Document added", null, render(r), 0, 0, r.line, r.endLine);
+            c.add("ADDED", label.isEmpty() ? "Document" : label, "Document added", null, render(r), 0, 0, r.line, r.endLine, 1, r.line);
         }
     }
 
+    /** @param lKey / rKey line of the key that holds the node (the node's own line for list items and documents) */
     private static void compareNode(YNode l, YNode r, String path, int lKey, int rKey, Collector c) {
         if (empty(l) && empty(r)) return;
         int ls = Math.min(lKey, l.line);
@@ -161,33 +170,41 @@ public final class LogicalFileComparer {
                 }
             }
             case MAP -> {
+                String previous = null;
                 for (Map.Entry<String, YNode> e : l.map.entrySet()) {
                     String key = e.getKey();
                     String p = join(path, key);
                     YNode lv = e.getValue();
                     if (r.has(key)) {
                         compareNode(lv, r.get(key), p, l.keyLine(key), r.keyLine(key), c);
+                        previous = key;
                     } else if (!empty(lv) || !isPlaceholderKey(key)) {
                         int start = l.keyLine(key);
-                        c.add("REMOVED", display(p), "Removed", render(lv), null, start, Math.max(start, lv.endLine), 0, 0);
+                        c.add("REMOVED", display(p), "Removed", render(lv), null, start, Math.max(start, lv.endLine), 0, 0,
+                                start, previous == null ? rKey : blockEnd(r, previous));
                     }
                 }
+                previous = null;
                 for (Map.Entry<String, YNode> e : r.map.entrySet()) {
                     String key = e.getKey();
-                    if (l.has(key)) continue;
+                    if (l.has(key)) {
+                        previous = key;
+                        continue;
+                    }
                     YNode rv = e.getValue();
                     int start = r.keyLine(key);
-                    c.add("ADDED", display(join(path, key)), "Added", null, render(rv), 0, 0, start, Math.max(start, rv.endLine));
+                    c.add("ADDED", display(join(path, key)), "Added", null, render(rv), 0, 0, start, Math.max(start, rv.endLine),
+                            previous == null ? lKey : blockEnd(l, previous), start);
                 }
             }
-            case SEQ -> compareSequence(l, r, path, c);
+            case SEQ -> compareSequence(l, r, path, lKey, rKey, c);
             case NULL -> {
                 // both empty
             }
         }
     }
 
-    private static void compareSequence(YNode l, YNode r, String path, Collector c) {
+    private static void compareSequence(YNode l, YNode r, String path, int lKey, int rKey, Collector c) {
         List<YNode> left = l.seq;
         List<YNode> right = r.seq;
         String lastKey = lastKey(path);
@@ -202,6 +219,7 @@ public final class LogicalFileComparer {
         int[] pairOf = new int[left.size()];
         Arrays.fill(pairOf, -1);
         boolean[] used = new boolean[right.size()];
+        // 1. same identity (name, key, mountPath …)
         for (int i = 0; i < left.size(); i++) {
             String id = identity(left.get(i));
             if (id == null) continue;
@@ -213,6 +231,7 @@ public final class LogicalFileComparer {
                 }
             }
         }
+        // 2. identical content
         for (int i = 0; i < left.size(); i++) {
             if (pairOf[i] >= 0) continue;
             String can = canonical(left.get(i));
@@ -224,6 +243,24 @@ public final class LogicalFileComparer {
                 }
             }
         }
+        // 3. items without identity: most similar content first, then remaining ones by position
+        List<double[]> candidates = new ArrayList<>();
+        for (int i = 0; i < left.size(); i++) {
+            if (pairOf[i] >= 0 || identity(left.get(i)) != null) continue;
+            for (int j = 0; j < right.size(); j++) {
+                if (used[j] || identity(right.get(j)) != null) continue;
+                double s = similarity(left.get(i), right.get(j));
+                if (s >= MIN_ITEM_SIMILARITY) candidates.add(new double[]{s, i, j});
+            }
+        }
+        candidates.sort((a, b) -> Double.compare(b[0], a[0]));
+        for (double[] cand : candidates) {
+            int i = (int) cand[1];
+            int j = (int) cand[2];
+            if (pairOf[i] >= 0 || used[j]) continue;
+            pairOf[i] = j;
+            used[j] = true;
+        }
         List<Integer> unpairedLeft = new ArrayList<>();
         for (int i = 0; i < left.size(); i++) if (pairOf[i] < 0 && identity(left.get(i)) == null) unpairedLeft.add(i);
         List<Integer> unusedRight = new ArrayList<>();
@@ -232,22 +269,39 @@ public final class LogicalFileComparer {
             pairOf[unpairedLeft.get(k)] = unusedRight.get(k);
             used[unusedRight.get(k)] = true;
         }
+        int[] leftOf = new int[right.size()];
+        Arrays.fill(leftOf, -1);
+        for (int i = 0; i < left.size(); i++) if (pairOf[i] >= 0) leftOf[pairOf[i]] = i;
 
         for (int i = 0; i < left.size(); i++) {
             YNode ln = left.get(i);
-            String label = identity(ln) != null ? identity(ln) : String.valueOf(i);
+            String p = path + "[" + itemLabel(ln, i) + "]";
             if (pairOf[i] >= 0) {
                 YNode rn = right.get(pairOf[i]);
-                compareNode(ln, rn, path + "[" + label + "]", ln.line, rn.line, c);
+                compareNode(ln, rn, p, ln.line, rn.line, c);
             } else {
-                c.add("REMOVED", display(path + "[" + label + "]"), "List item removed", render(ln), null, ln.line, ln.endLine, 0, 0);
+                int anchor = rKey;
+                for (int k = i - 1; k >= 0; k--) {
+                    if (pairOf[k] >= 0) {
+                        anchor = right.get(pairOf[k]).endLine;
+                        break;
+                    }
+                }
+                c.add("REMOVED", display(p), "List item removed", render(ln), null, ln.line, ln.endLine, 0, 0, ln.line, anchor);
             }
         }
         for (int j = 0; j < right.size(); j++) {
             if (used[j]) continue;
             YNode rn = right.get(j);
-            String label = identity(rn) != null ? identity(rn) : String.valueOf(j);
-            c.add("ADDED", display(path + "[" + label + "]"), "List item added", null, render(rn), 0, 0, rn.line, rn.endLine);
+            int anchor = lKey;
+            for (int k = j - 1; k >= 0; k--) {
+                if (leftOf[k] >= 0) {
+                    anchor = left.get(leftOf[k]).endLine;
+                    break;
+                }
+            }
+            c.add("ADDED", display(path + "[" + itemLabel(rn, j) + "]"), "List item added", null, render(rn),
+                    0, 0, rn.line, rn.endLine, anchor, rn.line);
         }
     }
 
@@ -313,7 +367,8 @@ public final class LogicalFileComparer {
         return out;
     }
 
-    private record Op(char type, Line line) {
+    /** For '=' {@code line} is the left line and {@code other} the right one. */
+    private record Op(char type, Line line, Line other) {
     }
 
     private static void lineDiff(List<Line> left, List<Line> right, Collector c) {
@@ -330,17 +385,15 @@ public final class LogicalFileComparer {
         int j = 0;
         while (i < n && j < m) {
             if (left.get(i).text().equals(right.get(j).text())) {
-                ops.add(new Op('=', null));
-                i++;
-                j++;
+                ops.add(new Op('=', left.get(i++), right.get(j++)));
             } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-                ops.add(new Op('-', left.get(i++)));
+                ops.add(new Op('-', left.get(i++), null));
             } else {
-                ops.add(new Op('+', right.get(j++)));
+                ops.add(new Op('+', right.get(j++), null));
             }
         }
-        while (i < n) ops.add(new Op('-', left.get(i++)));
-        while (j < m) ops.add(new Op('+', right.get(j++)));
+        while (i < n) ops.add(new Op('-', left.get(i++), null));
+        while (j < m) ops.add(new Op('+', right.get(j++), null));
 
         // Lines that only moved are not differences.
         Map<String, Integer> removed = new HashMap<>();
@@ -361,9 +414,13 @@ public final class LogicalFileComparer {
 
         List<Line> dels = new ArrayList<>();
         List<Line> ins = new ArrayList<>();
+        int lastLeft = 0;
+        int lastRight = 0;
         for (Op op : ops) {
             if (op.type() == '=') {
-                flushHunk(dels, ins, c);
+                flushHunk(dels, ins, c, lastLeft, lastRight);
+                lastLeft = op.line().line();
+                lastRight = op.other().line();
                 continue;
             }
             Map<String, Integer> moved = op.type() == '-' ? movedDel : movedIns;
@@ -374,10 +431,11 @@ public final class LogicalFileComparer {
             }
             (op.type() == '-' ? dels : ins).add(op.line());
         }
-        flushHunk(dels, ins, c);
+        flushHunk(dels, ins, c, lastLeft, lastRight);
     }
 
-    private static void flushHunk(List<Line> dels, List<Line> ins, Collector c) {
+    /** @param lastLeft / lastRight the last equal lines before the hunk: where it sits in the other file */
+    private static void flushHunk(List<Line> dels, List<Line> ins, Collector c, int lastLeft, int lastRight) {
         if (dels.isEmpty() && ins.isEmpty()) return;
         String leftText = joinLines(dels);
         String rightText = joinLines(ins);
@@ -388,9 +446,9 @@ public final class LogicalFileComparer {
         if (!dels.isEmpty() && !ins.isEmpty()) {
             c.add("CHANGED", "Lines " + ls + " ↔ " + rs, "Lines changed", leftText, rightText, ls, le, rs, re);
         } else if (!dels.isEmpty()) {
-            c.add("REMOVED", "Line " + ls, "Lines removed", leftText, null, ls, le, 0, 0);
+            c.add("REMOVED", "Line " + ls, "Lines removed", leftText, null, ls, le, 0, 0, ls, Math.max(1, lastRight));
         } else {
-            c.add("ADDED", "Line " + rs, "Lines added", null, rightText, 0, 0, rs, re);
+            c.add("ADDED", "Line " + rs, "Lines added", null, rightText, 0, 0, rs, re, Math.max(1, lastLeft), rs);
         }
         dels.clear();
         ins.clear();
@@ -407,21 +465,38 @@ public final class LogicalFileComparer {
         final List<Diff> diffs = new ArrayList<>();
 
         void add(String kind, String path, String description, String left, String right, int ls, int le, int rs, int re) {
-            diffs.add(new Diff("d" + (diffs.size() + 1), kind, path, description, left, right, ls, le, rs, re));
+            add(kind, path, description, left, right, ls, le, rs, re, 0, 0);
         }
 
+        /** @param la / ra line to show on a side without lines of its own */
+        void add(String kind, String path, String description, String left, String right, int ls, int le, int rs, int re,
+                 int la, int ra) {
+            diffs.add(new Diff("d" + (diffs.size() + 1), kind, path, description, left, right, ls, le, rs, re,
+                    ls > 0 ? ls : la, rs > 0 ? rs : ra));
+        }
+
+        /** In the order of the left file; blocks that exist only on the right sit where they would appear. */
         List<Diff> sorted() {
             List<Diff> out = new ArrayList<>(diffs);
-            out.sort(Comparator.comparingInt((Diff d) -> d.leftStart() > 0 ? d.leftStart() : d.rightStart())
-                    .thenComparingInt(d -> d.rightStart()));
+            out.sort(Comparator.comparingLong(Collector::position).thenComparingInt(Diff::rightAnchor));
             List<Diff> renumbered = new ArrayList<>();
             for (int i = 0; i < out.size(); i++) {
                 Diff d = out.get(i);
                 renumbered.add(new Diff("d" + (i + 1), d.kind(), d.path(), d.description(), d.left(), d.right(),
-                        d.leftStart(), d.leftEnd(), d.rightStart(), d.rightEnd()));
+                        d.leftStart(), d.leftEnd(), d.rightStart(), d.rightEnd(), d.leftAnchor(), d.rightAnchor()));
             }
             return renumbered;
         }
+
+        private static long position(Diff d) {
+            if (d.leftStart() > 0) return 2L * d.leftStart();
+            if (d.leftAnchor() > 0) return 2L * d.leftAnchor() + 1;
+            return 2L * d.rightAnchor();
+        }
+    }
+
+    private static int blockEnd(YNode map, String key) {
+        return Math.max(map.keyLine(key), map.get(key).endLine);
     }
 
     private static boolean empty(YNode n) {
@@ -437,7 +512,7 @@ public final class LogicalFileComparer {
         if (!doc.isMap() || doc.str("kind") == null) return null;
         YNode metadata = doc.get("metadata");
         String name = metadata != null && metadata.isMap() && metadata.str("name") != null ? metadata.str("name") : "";
-        return doc.str("kind") + (name.isEmpty() ? "" : "/" + name);
+        return doc.str("kind") + (name.isEmpty() ? "" : "[name=" + name + "]");
     }
 
     private static String documentLabel(YNode doc, int index, boolean multi) {
@@ -446,13 +521,36 @@ public final class LogicalFileComparer {
         return multi ? "Document " + (index + 1) : "";
     }
 
+    /** "name=config", "mountPath=/data" … or null when the item has no identifying key. */
     private static String identity(YNode n) {
         if (n == null || !n.isMap()) return null;
         for (String key : IDENTITY_KEYS) {
             String v = n.str(key);
-            if (v != null) return key.equals("name") ? v : key + "=" + v;
+            if (v != null) return key + "=" + v;
         }
         return null;
+    }
+
+    /** XPath-like list item selector: [name=config] or the 1-based position. */
+    private static String itemLabel(YNode n, int index) {
+        String id = identity(n);
+        return id != null ? id : String.valueOf(index + 1);
+    }
+
+    /** Share of keys with the same value (keys present on both sides count a little too). */
+    private static double similarity(YNode a, YNode b) {
+        if (!a.isMap() || !b.isMap()) return 0;
+        Set<String> keys = new HashSet<>(a.map.keySet());
+        keys.addAll(b.map.keySet());
+        if (keys.isEmpty()) return 0;
+        int shared = 0;
+        int equal = 0;
+        for (String k : keys) {
+            if (!a.has(k) || !b.has(k)) continue;
+            shared++;
+            if (canonical(a.get(k)).equals(canonical(b.get(k)))) equal++;
+        }
+        return (equal + 0.25 * shared) / (keys.size() * 1.25);
     }
 
     private static String canonical(YNode n) {

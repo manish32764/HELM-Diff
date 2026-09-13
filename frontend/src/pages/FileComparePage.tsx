@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../api/client'
 import type { FileView, LogicalDiff, SideState } from '../api/types'
-import { CodePane, scrollToLine } from '../components/CodePane'
+import { alignBlocks, CodePane } from '../components/CodePane'
 import type { LineMark } from '../components/CodePane'
 import { ChevronDownIcon, ChevronUpIcon, MaximizeIcon, PopOutIcon, RestoreIcon } from '../components/Icons'
 import { Button, Spinner, Toggle } from '../components/ui'
@@ -53,6 +53,7 @@ function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: File
   /** The pane the user is interacting with; only it drives the other pane, so they never fight. */
   const activePane = useRef<Side | null>(null)
   const programmatic = useRef(false)
+  const lastTop = useRef<Record<Side, number>>({ left: 0, right: 0 })
   const channel = useRef<BroadcastChannel | null>(null)
   const diffs = view.differences
   const mode = modeFor(view.name)
@@ -80,6 +81,16 @@ function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: File
       put(left, d.leftStart, d.leftEnd, d.kind === 'CHANGED' ? 'changed' : 'removed', d)
       put(right, d.rightStart, d.rightEnd, d.kind === 'CHANGED' ? 'changed' : 'added', d)
     }
+    // where the selected block is missing, mark the line it would follow
+    const current = diffs.find((d) => d.id === selected)
+    if (current) {
+      if (current.leftStart === 0 && current.leftAnchor > 0 && !left.has(current.leftAnchor)) {
+        left.set(current.leftAnchor, { kind: 'anchor', ids: [current.id], selected: true })
+      }
+      if (current.rightStart === 0 && current.rightAnchor > 0 && !right.has(current.rightAnchor)) {
+        right.set(current.rightAnchor, { kind: 'anchor', ids: [current.id], selected: true })
+      }
+    }
     return { left, right }
   }, [diffs, showDiffs, selected])
 
@@ -88,9 +99,11 @@ function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: File
     setSelected(d.id)
     programmatic.current = true
     requestAnimationFrame(() => {
-      scrollToLine(leftRef.current, d.leftStart)
-      scrollToLine(rightRef.current, d.rightStart)
-      setTimeout(() => { programmatic.current = false }, 120)
+      alignBlocks([
+        { pane: leftRef.current, start: d.leftStart || d.leftAnchor || d.rightStart, end: d.leftStart ? d.leftEnd : 0 },
+        { pane: rightRef.current, start: d.rightStart || d.rightAnchor || d.leftStart, end: d.rightStart ? d.rightEnd : 0 },
+      ])
+      setTimeout(() => { programmatic.current = false }, 150)
     })
     document.querySelector(`[data-diff="${d.id}"]`)?.scrollIntoView({ block: 'nearest' })
     channel.current?.postMessage({ type: 'selected', diffId: d.id })
@@ -147,12 +160,17 @@ function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: File
     return () => window.removeEventListener('keydown', onKey)
   }, [step, onBack, panel, codeOnly])
 
+  /** Scrolling together moves both panes by the same distance, so blocks aligned by Next / Previous stay level. */
   const onScroll = (source: Side) => {
-    if (!sync || programmatic.current) return
-    if (activePane.current !== null && activePane.current !== source) return
     const from = source === 'left' ? leftRef.current : rightRef.current
     const to = source === 'left' ? rightRef.current : leftRef.current
-    if (from && to && to.scrollTop !== from.scrollTop) to.scrollTop = from.scrollTop
+    if (!from) return
+    const delta = from.scrollTop - lastTop.current[source]
+    lastTop.current[source] = from.scrollTop
+    if (!sync || programmatic.current || !to || delta === 0) return
+    if (activePane.current !== null && activePane.current !== source) return
+    to.scrollTop += delta
+    lastTop.current[source === 'left' ? 'right' : 'left'] = to.scrollTop
   }
 
   const onLineClick = (ids: string[]) => {

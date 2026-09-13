@@ -4,16 +4,30 @@ import { highlight } from '../lib/highlight'
 import type { Mode } from '../lib/highlight'
 
 export interface LineMark {
-  kind: 'added' | 'removed' | 'changed'
+  /** `anchor`: the block is missing on this side and would appear after this line. */
+  kind: 'added' | 'removed' | 'changed' | 'anchor'
   ids: string[]
   selected: boolean
 }
 
-/** Scrolls a code pane so the given line sits in the upper third. */
-export function scrollToLine(pane: HTMLDivElement | null, line: number) {
-  if (!pane || line <= 0) return
-  const el = pane.querySelector<HTMLElement>(`[data-line="${line}"]`)
-  if (el) pane.scrollTop = Math.max(0, el.offsetTop - pane.clientHeight / 3)
+/**
+ * Scrolls every pane so its block starts at the same distance from the top: the two sides of a difference sit
+ * side by side, centred when the tallest block fits, otherwise with its first lines near the top.
+ */
+export function alignBlocks(targets: { pane: HTMLDivElement | null; start: number; end: number }[]) {
+  const blocks = targets.flatMap(({ pane, start, end }) => {
+    const first = start > 0 ? pane?.querySelector<HTMLElement>(`[data-line="${start}"]`) : null
+    if (!pane || !first) return []
+    const last = pane.querySelector<HTMLElement>(`[data-line="${Math.max(start, end)}"]`) ?? first
+    return [{ pane, top: first.offsetTop, height: last.offsetTop + last.offsetHeight - first.offsetTop }]
+  })
+  if (blocks.length === 0) return
+  const view = Math.min(...blocks.map((b) => b.pane.clientHeight))
+  const tallest = Math.max(...blocks.map((b) => b.height))
+  const wanted = Math.max(32, Math.min(view / 3, (view - tallest) / 2))
+  // a block near the top of its file cannot scroll further down: use the offset every side can reach
+  const offset = Math.min(wanted, ...blocks.map((b) => b.top))
+  for (const b of blocks) b.pane.scrollTop = b.top - offset
 }
 
 export const CodePane = memo(function CodePane({ lines, mode, marks, placeholder, paneRef, onScroll, onActivate, onLineClick }: {

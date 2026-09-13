@@ -112,9 +112,9 @@ function Diffs({ id, view }: { id: string; view: FileView }) {
                   <span className={`tbadge ${cls}`}>{label}</span>
                   <span className="dv-path mono">{d.path}</span>
                   <span className="dv-lines">
-                    {d.leftStart > 0 ? `${leftTitle} line ${range(d.leftStart, d.leftEnd)}` : ''}
-                    {d.leftStart > 0 && d.rightStart > 0 ? '  ·  ' : ''}
-                    {d.rightStart > 0 ? `${rightTitle} line ${range(d.rightStart, d.rightEnd)}` : ''}
+                    {lineText(leftTitle, d.leftStart, d.leftEnd, d.leftAnchor)}
+                    {(d.leftStart || d.leftAnchor) && (d.rightStart || d.rightAnchor) ? '  ·  ' : ''}
+                    {lineText(rightTitle, d.rightStart, d.rightEnd, d.rightAnchor)}
                   </span>
                 </div>
                 <div className="dv-values">
@@ -140,6 +140,11 @@ function DiffValue({ title, value, against, tone }: { title: string; value?: str
         : <pre className={`dv-pre ${tone}`}>{against != null ? <DiffText value={value} against={against} /> : value}</pre>}
     </div>
   )
+}
+
+function lineText(title: string, start: number, end: number, anchor: number) {
+  if (start > 0) return `${title} line ${range(start, end)}`
+  return anchor > 0 ? `${title} after line ${anchor}` : ''
 }
 
 function range(a: number, b: number) {

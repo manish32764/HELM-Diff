@@ -129,7 +129,8 @@
 .pane-root { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .code-pane { position: relative; overflow: scroll; min-width: 0; min-height: 0; background: #fff; }
-.code-inner { display: inline-block; min-width: 100%; padding: 4px 0 12px; font-family: var(--mono); font-size: 12.5px; line-height: 20px; }
+/* Space after the last line lets a block near the end of one file scroll level with the other file. */
+.code-inner { display: inline-block; min-width: 100%; padding: 4px 0 70vh; font-family: var(--mono); font-size: 12.5px; line-height: 20px; }
 .code-line { display: flex; min-height: 20px; }
 .code-ln {
   position: sticky; left: 0; z-index: 1; flex-shrink: 0; width: 52px; padding-right: 12px; text-align: right;
@@ -150,6 +151,12 @@
 .code-line.sel.hl-removed { background: #ffcfcc; }
 .code-line.sel.hl-changed { background: #ffeaa0; }
 .code-line.sel .code-ln { box-shadow: inset 5px 0 var(--accent); color: var(--text); font-weight: 600; }
+/* The selected block briefly flashes so the eye finds it on both sides after Next / Previous. */
+.code-line.sel { animation: sel-flash .9s ease-out; }
+@keyframes sel-flash { 0%, 35% { box-shadow: inset 0 0 0 999px rgba(0, 113, 227, .16); } 100% { box-shadow: none; } }
+/* Missing on this side: a line under the place where the block would be. */
+.code-line.hl-anchor { cursor: pointer; background-image: repeating-linear-gradient(90deg, #cf222e 0 6px, transparent 6px 10px); background-size: 100% 2px; background-repeat: no-repeat; background-position: bottom; }
+.code-line.hl-anchor .code-ln { color: #cf222e; }
 
 /* VS Code Light+ inspired syntax colours */
 .tk-key { color: #800000; }
