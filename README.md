@@ -1,0 +1,82 @@
+# Helm Compare
+
+Intelligent Helm chart comparison across environments and application versions.
+It compares charts by **logical configuration and meaning** rather than line position, correlates PROD
+differences across versions, validates newer PROD charts and applies PROD expectations across a portfolio.
+
+```
+HELM-Compare/
+├── backend/    Java 21 · Spring Boot 3.5 · Maven   (REST API, parsing, analysis engines, export)
+└── frontend/   React 19 · TypeScript · Vite 7      (light, Apple-inspired UI)
+```
+
+## Run
+
+**Backend** (port 8080)
+
+```powershell
+cd backend
+mvn spring-boot:run
+# or: mvn package; java -jar target/helm-compare-1.0.0.jar
+```
+
+**Frontend** (port 5173, proxies `/api` to the backend)
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 and click **Load sample data** on the home page. It loads
+`payments-api` 3.0.4 / 3.1.3 NON-PROD / PROD charts, a generated 40-application portfolio,
+and one analysis of every kind.
+
+Data (charts, analyses, audit history) is stored as JSON under `backend/data/`
+(change with `--helmcompare.data-dir=...`). No database is required.
+
+## Analysis modes
+
+| Mode | Input | Answers |
+|---|---|---|
+| 1 · Two-chart diff | A ↔ B | Common, only-in-A, only-in-B, changed, PROD-specific, security and review items. Saved as a reusable **Difference Set**. |
+| 2 · Two-diff comparison | (A ↔ B) ↔ (C ↔ D) | Carried forward, changed implementation, missing, new PROD change, no longer applicable — with *same / similar / different / unable to determine* similarity. |
+| 3 · Four-chart analysis | A + B + C (+ D) | Evolution matrix, NON-PROD assessment for PROD preparation, and — when D exists — PROD validation with a verdict. |
+| 4 · Portfolio | Difference Set → many charts | Compliant / requires changes / requires review per application and per expectation, unexpected and unusual PROD changes, similar changes across charts. |
+
+Every difference can be opened to see both configurations, the setting-level changes, and a link to the
+exact line in the Helm source. Reviewers record decisions (Accepted, Change required, Not applicable) which
+are kept in the analysis audit trail. Analyses can be **re-run** with newer chart revisions.
+
+## Export
+
+Every analysis can be exported from the **Export** button (or `GET /api/analyses/{id}/export?format=`):
+
+- `xlsx` — Excel workbook, one sheet per table, status colours, filters and frozen headers
+- `html` — standalone report; print or save as PDF
+- `csv` — main table
+- `json` — complete data
+
+## What is recognised
+
+Charts can be uploaded as values files, templates, rendered manifests, a chart folder, `.zip`, `.tgz` or `.tar`.
+Simple `{{ .Values.x }}`, `{{ toYaml .Values.x | nindent N }}` and `{{ with }}` scopes are resolved against
+`values.yaml`; anything else becomes a placeholder, and unparseable template lines are skipped with a warning.
+
+| Area | Recognised as |
+|---|---|
+| Environment variables | `env` lists and `env` maps (values style), `envFrom` |
+| Secrets | plain text vs K8s `secretKeyRef` vs AKeyless (`akeyless:` values, AKeyless secret stores / ExternalSecrets, `akeyless` annotations) vs Vault / external secrets. Sensitive values are masked and compared by fingerprint only. |
+| Health probes | `livenessProbe`, `readinessProbe`, `startupProbe`, or `probes.liveness` … in values |
+| TSC | `topologySpreadConstraints` (or keys named `tsc` / `topologySpread*`) |
+| Other | resources, volumes & mounts, services / ingress / ports, image, replicas & autoscaling, security context, scheduling, labels & annotations, ConfigMap data (embedded YAML / properties are compared per setting), and every remaining value |
+
+Portfolio uploads are grouped automatically: `<app>/nonprod|prod/…`, `nonprod|prod/<app>/…` or
+`<app>-nonprod.yaml` / `<app>-prod.yaml` (also `np, dev, qa, uat, sit, test, staging, preprod` / `prd, production, live`).
+
+## Principle
+
+The tool never assumes that every historical PROD difference is required in the new version.
+Historical PROD behaviour + new-version changes + current PROD implementation → **assessment**, with items that
+cannot be determined confidently marked for human review. In portfolio analysis each derived expectation can
+be deselected or limited to charts where the configuration is present.
