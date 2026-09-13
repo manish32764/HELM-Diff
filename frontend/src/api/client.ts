@@ -1,6 +1,6 @@
 import type {
   AnalysisRecord, AnalysisSummary, ChartRecord, ConfigItem, EnvView, Expectation, FileView, FolderCompare, FolderCompareInfo,
-  PortfolioRecord, SearchHit, SourceView,
+  PortfolioRecord, SearchHit, SecretValuesInfo, SourceView,
 } from './types'
 
 /** Multipart upload with progress reporting (fetch cannot report upload progress). */
@@ -93,6 +93,12 @@ export const api = {
   folderExportUrl: (id: string, format: string) => `/api/folder-compares/${id}/export?format=${format}`,
   folderEnv: (id: string, path: string, scope: 'FILE' | 'FOLDER') =>
     request<EnvView>(`/api/folder-compares/${id}/env?path=${encodeURIComponent(path)}&scope=${scope}`),
-  folderEnvExportUrl: (id: string, path: string, scope: string, format: string) =>
-    `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}`,
+  folderEnvExportUrl: (id: string, path: string, scope: string, format: string, showSecrets = false) =>
+    `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}&showSecrets=${showSecrets}`,
+  uploadSecretValues: (id: string, files: File[], replace: boolean) => {
+    const form = new FormData()
+    files.forEach((f) => form.append('file', f))
+    return request<SecretValuesInfo>(`/api/folder-compares/${id}/secret-values?replace=${replace}`, { method: 'POST', body: form })
+  },
+  clearSecretValues: (id: string) => request<void>(`/api/folder-compares/${id}/secret-values`, { method: 'DELETE' }),
 }

@@ -1,5 +1,6 @@
 package com.helmcompare.export;
 
+import com.helmcompare.diff.EnvVarExtractor;
 import com.helmcompare.diff.LogicalFileComparer;
 import com.helmcompare.model.FolderCompare;
 import com.helmcompare.model.FolderCompare.Node;
@@ -93,40 +94,62 @@ public class FolderCompareExport {
         };
     }
 
-    public ExportService.Export envExport(String id, String path, String scope, String format) {
+    public ExportService.Export envExport(String id, String path, String scope, String format, boolean showSecrets) {
         FolderCompareService.EnvView view = service.envVars(id, path, scope);
         String left = view.leftName() + (view.leftLabel() == null ? "" : " (" + view.leftLabel() + ")");
         String right = view.rightName() + (view.rightLabel() == null ? "" : " (" + view.rightLabel() + ")");
         String scopeText = "FOLDER".equals(view.scope()) ? "folder " + (view.scopePath().isEmpty() ? "(all)" : view.scopePath()) : "file " + view.path();
         String title = "Environment variables · " + scopeText;
+        var s = view.summary();
 
         List<String[]> meta = new ArrayList<>();
         meta.add(new String[]{"Left folder", left});
         meta.add(new String[]{"Right folder", right});
         meta.add(new String[]{"Scope", scopeText});
-        meta.add(new String[]{"Common", String.valueOf(view.summary().common())});
-        meta.add(new String[]{"Only in left", String.valueOf(view.summary().leftOnly())});
-        meta.add(new String[]{"Only in right", String.valueOf(view.summary().rightOnly())});
-        meta.add(new String[]{"Matched by similar name", String.valueOf(view.summary().similarNames())});
-        meta.add(new String[]{"Source changed (e.g. plain → AKeyless)", String.valueOf(view.summary().sourceChanged())});
-        meta.add(new String[]{"Value differs", String.valueOf(view.summary().valueDiffers())});
+        meta.add(new String[]{"Missing in right (only in left)", String.valueOf(s.leftOnly())});
+        meta.add(new String[]{"Missing in left (only in right)", String.valueOf(s.rightOnly())});
+        meta.add(new String[]{"Different value", String.valueOf(s.valueDiffers())});
+        meta.add(new String[]{"Cannot verify", String.valueOf(s.unverified())});
+        meta.add(new String[]{"Same value", String.valueOf(s.same())});
+        meta.add(new String[]{"Source changed (e.g. plain → AKeyless)", String.valueOf(s.sourceChanged())});
+        meta.add(new String[]{"Matched by similar name", String.valueOf(s.similarNames())});
+        meta.add(new String[]{"Defined more than once", String.valueOf(s.duplicates())});
+        meta.add(new String[]{"AKeyless values", view.secrets().loadedPaths() == 0 ? "not uploaded"
+                : view.secrets().loadedPaths() + " path(s) from " + String.join(", ", view.secrets().files())
+                + " · " + view.secrets().resolved() + " of " + view.secrets().referenced() + " reference(s) resolved"});
+        meta.add(new String[]{"Secret values", showSecrets ? "shown" : "masked"});
 
         List<List<String>> rows = new ArrayList<>();
         int n = 0;
         for (var r : view.rows()) {
             n++;
-            rows.add(List.of(String.valueOf(n),
-                    r.left() == null ? "" : r.left().name(), r.left() == null ? "" : valueText(r.left()), r.left() == null ? "" : sourceText(r.left().source()),
-                    r.right() == null ? "" : r.right().name(), r.right() == null ? "" : valueText(r.right()), r.right() == null ? "" : sourceText(r.right().source()),
-                    r.status(),
-                    r.comparison() == null ? "" : r.comparison(),
-                    "SIMILAR_NAME".equals(r.match()) ? "Similar name (" + r.similarity() + "%)" : r.match() == null ? "" : "Same name",
-                    r.left() == null ? "" : r.left().file() + ":" + r.left().line(),
-                    r.right() == null ? "" : r.right().file() + ":" + r.right().line()));
+            String result = switch (r.status()) {
+                case "LEFT_ONLY", "RIGHT_ONLY" -> "MISSING";
+                default -> switch (r.comparison()) {
+                    case "SAME" -> "SAME";
+                    case "VALUE_DIFFERS" -> "DIFFERS";
+                    default -> "UNDETERMINED";
+                };
+            };
+            List<String> notes = new ArrayList<>();
+            if ("LEFT_ONLY".equals(r.status())) notes.add("Not defined in " + view.rightName());
+            if ("RIGHT_ONLY".equals(r.status())) notes.add("Not defined in " + view.leftName());
+            if (r.sourceChanged()) notes.add(sourceText(r.left().source()) + " → " + sourceText(r.right().source()));
+            if ("SIMILAR_NAME".equals(r.match())) notes.add("Similar name (" + r.similarity() + "%)");
+            if (!r.leftOthers().isEmpty()) notes.add("Left defined " + (r.leftOthers().size() + 1) + "×");
+            if (!r.rightOthers().isEmpty()) notes.add("Right defined " + (r.rightOthers().size() + 1) + "×");
+            if (r.duplicateConflict()) notes.add("duplicate definitions have different values");
+            List<String> row = new ArrayList<>(List.of(String.valueOf(n), r.left() != null ? r.left().name() : r.right().name(),
+                    result, String.join(" · ", notes)));
+            side(row, r.left(), showSecrets);
+            side(row, r.right(), showSecrets);
+            rows.add(row);
         }
         ExportService.Report report = new ExportService.Report(title, meta, List.of(new ExportService.Table("Environment Variables",
-                List.of("#", "Left variable", "Left value", "Left source", "Right variable", "Right value", "Right source",
-                        "Status", "Comparison", "Name match", "Left location", "Right location"), rows, Set.of(7, 8))));
+                List.of("#", "Variable", "Result", "Notes",
+                        "Left name", "Left injected via", "Left source", "Left value", "Left AKeyless path", "Left location",
+                        "Right name", "Right injected via", "Right source", "Right value", "Right AKeyless path", "Right location"),
+                rows, Set.of(2))));
         String base = slug("env " + view.leftName() + " vs " + view.rightName() + " " + (view.scopePath().isEmpty() ? view.path() : view.scopePath())) + "-" + id;
         return switch (format.toLowerCase(Locale.ROOT)) {
             case "csv" -> new ExportService.Export(base + ".csv", "text/csv;charset=UTF-8", exports.csv(report));
@@ -137,9 +160,28 @@ public class FolderCompareExport {
         };
     }
 
-    private static String valueText(com.helmcompare.diff.EnvVarExtractor.EnvVar v) {
-        if (v.reference() == null || v.reference().isBlank()) return nz(v.value());
-        return v.value() == null || v.value().isBlank() ? v.reference() : v.value() + "  [" + v.reference() + "]";
+    private static void side(List<String> row, EnvVarExtractor.EnvVar v, boolean showSecrets) {
+        if (v == null) {
+            row.addAll(List.of("— not defined —", "", "", "", "", ""));
+            return;
+        }
+        row.addAll(List.of(v.name(), nz(v.injection()).replaceAll(" @ [^›]*", ""), sourceText(v.source()), valueText(v, showSecrets),
+                nz(v.akeylessPath()), v.file() + ":" + v.line()));
+    }
+
+    private static String valueText(EnvVarExtractor.EnvVar v, boolean showSecrets) {
+        String value = v.effectiveValue();
+        if (value == null) {
+            return switch (v.valueState()) {
+                case EnvVarExtractor.STATE_NO_JSON -> "(AKeyless value not uploaded)";
+                case EnvVarExtractor.STATE_NOT_IN_JSON -> "(AKeyless path not in JSON)";
+                default -> "(not in chart" + (v.reference() == null ? ")" : ": " + v.reference() + ")");
+            };
+        }
+        boolean secret = EnvVarExtractor.STATE_RESOLVED.equals(v.valueState()) || EnvVarExtractor.KIND_SECRET_DATA.equals(v.kind())
+                || EnvVarExtractor.KIND_SECRET_VALUE.equals(v.kind());
+        if (secret && !showSecrets) return "•••••••• (" + value.length() + " chars)";
+        return value;
     }
 
     private static String sourceText(String source) {

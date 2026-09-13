@@ -23,6 +23,22 @@ HELM-Compare/
    difference highlights the exact lines on both sides (green = added, red = removed, amber = changed).
    Keyboard: `n` / `p` next / previous difference, `Backspace` back, `[` collapse / expand the sidebar.
 5. Export any comparison to Excel, HTML or CSV (folders, files and every logical difference with line numbers).
+6. **ENV** (on a file or folder) opens *Environment variables & secrets*: one row per variable with how it is injected
+   and the value the container receives on each side. `envVars` (plain text), `envSecrets`
+   (`name` ← `secretName`/`secretKey`) and `externalsecrets.akeyless.secretItems` (key → AKeyless `path`) are linked,
+   so `JIRA_API_TOKEN ← envSecrets › Secret attlasian-mcp-server · key JIRA_API_TOKEN › secretItems /Platform/…` is
+   one row. Each row is **Missing in right / left**, **Different value**, **Can't verify** or **Same value**; plain ↔
+   AKeyless changes, similar names and variables defined twice (e.g. in `envVars` *and* as a secret item) are flagged.
+   Because PROD reads AKeyless while NON-PROD is plain text, upload a **values JSON** with the actual value of each
+   AKeyless path; the paths still missing can be copied as a JSON template:
+
+   ```json
+   { "/Platform/KPS/APM0007705/common/API_KEY": "value", "/Platform/KPS/APM0007705/dev/azure/assist-dev/CLIENT_ID": "…" }
+   ```
+
+   Nested folders (`{ "Platform": { "KPS": { … } } }`) and lists (`[{ "path": "…", "value": "…" }]`) also work. The values
+   are stored with the comparison (`data/folder-compares/{id}/secret-values.json`), are masked on screen and in exports
+   unless *Show secret values* is on, and are removed with *Clear* or when the comparison is deleted.
 
 Hidden folders (such as `.git`), `node_modules`, `target` and files over 10 MB are skipped.
 

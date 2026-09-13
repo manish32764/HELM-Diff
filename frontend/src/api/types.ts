@@ -364,6 +364,9 @@ export interface LogicalDiff {
 
 export type EnvSource = 'PLAIN' | 'EMPTY' | 'TEMPLATE' | 'AKEYLESS' | 'K8S_SECRET' | 'EXTERNAL_SECRET' | 'VAULT' | 'CONFIGMAP' | 'FIELD_REF'
 
+/** LITERAL: value written in the chart · RESOLVED: AKeyless value found in the uploaded JSON · NOT_IN_JSON / NO_JSON: AKeyless value not known · UNKNOWN: lives elsewhere */
+export type EnvValueState = 'LITERAL' | 'RESOLVED' | 'NOT_IN_JSON' | 'NO_JSON' | 'UNKNOWN'
+
 export interface EnvVar {
   name: string
   value?: string
@@ -372,6 +375,13 @@ export interface EnvVar {
   kind: string
   file: string
   line: number
+  secretName?: string
+  secretKey?: string
+  /** Steps separated by " › "; a step may end with " @ file:line". */
+  injection?: string
+  akeylessPath?: string
+  effectiveValue?: string
+  valueState: EnvValueState
 }
 
 export interface EnvRow {
@@ -381,8 +391,16 @@ export interface EnvRow {
   similarity?: number
   left?: EnvVar
   right?: EnvVar
-  comparison?: 'SAME' | 'VALUE_DIFFERS' | 'SOURCE_CHANGED'
+  comparison?: 'SAME' | 'VALUE_DIFFERS' | 'UNVERIFIED'
+  sourceChanged: boolean
+  leftOthers: EnvVar[]
+  rightOthers: EnvVar[]
+  duplicateConflict: boolean
 }
+
+export interface SecretValuesInfo { paths: number; files: string[]; updatedAt?: string }
+
+export interface MissingSecretPath { side: 'LEFT' | 'RIGHT'; variable: string; path: string; file: string; line: number }
 
 export interface EnvView {
   path: string
@@ -403,9 +421,19 @@ export interface EnvView {
     similarNames: number
     same: number
     valueDiffers: number
+    unverified: number
     sourceChanged: number
+    duplicates: number
     left: number
     right: number
+  }
+  secrets: {
+    loadedPaths: number
+    files: string[]
+    updatedAt?: string
+    referenced: number
+    resolved: number
+    missing: MissingSecretPath[]
   }
 }
 

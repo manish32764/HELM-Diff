@@ -1,10 +1,14 @@
 package com.helmcompare.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.helmcompare.diff.AkeylessValues;
 import com.helmcompare.diff.EnvVarComparer;
 import com.helmcompare.diff.EnvVarExtractor;
 import com.helmcompare.diff.LogicalFileComparer;
 import com.helmcompare.model.FolderCompare;
 import com.helmcompare.model.FolderCompare.Node;
+import com.helmcompare.model.SecretValues;
 import com.helmcompare.parse.ChartArchive;
 import com.helmcompare.store.FolderCompareStore;
 import org.springframework.stereotype.Service;
@@ -36,9 +40,11 @@ public class FolderCompareService {
     private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
 
     private final FolderCompareStore store;
+    private final ObjectMapper mapper;
 
-    public FolderCompareService(FolderCompareStore store) {
+    public FolderCompareService(FolderCompareStore store, ObjectMapper mapper) {
         this.store = store;
+        this.mapper = mapper;
     }
 
     public record FileView(String path, String name, String status, String reason, String leftState, String rightState,
@@ -117,7 +123,59 @@ public class FolderCompareService {
 
     public record EnvView(String path, String scope, String scopePath, boolean pathIsFile, List<String> files,
                           String leftName, String rightName, String leftLabel, String rightLabel,
-                          List<EnvVarComparer.Row> rows, EnvVarComparer.Summary summary) {
+                          List<EnvVarComparer.Row> rows, EnvVarComparer.Summary summary, SecretsSummary secrets) {
+    }
+
+    /** An AKeyless path referenced by the charts whose value is not (yet) in the uploaded JSON. */
+    public record MissingPath(String side, String variable, String path, String file, int line) {
+    }
+
+    /**
+     * @param loadedPaths paths in the uploaded JSON
+     * @param referenced  AKeyless references of the compared variables (both sides)
+     * @param resolved    references whose value was found in the JSON
+     */
+    public record SecretsSummary(int loadedPaths, List<String> files, Instant updatedAt, int referenced, int resolved,
+                                 List<MissingPath> missing) {
+    }
+
+    public record SecretValuesInfo(int paths, List<String> files, Instant updatedAt) {
+    }
+
+    public SecretValuesInfo secretValuesInfo(String id) {
+        get(id);
+        return store.secretValues(id).map(v -> new SecretValuesInfo(v.values.size(), v.files, v.updatedAt))
+                .orElse(new SecretValuesInfo(0, List.of(), null));
+    }
+
+    /** Merges uploaded JSON files (AKeyless path → value) into the values of the comparison, or replaces them. */
+    public SecretValuesInfo uploadSecretValues(String id, List<MultipartFile> files, boolean replace) {
+        get(id);
+        if (files == null || files.isEmpty()) throw new IllegalArgumentException("Choose a JSON file with AKeyless values.");
+        SecretValues values = replace ? new SecretValues() : store.secretValues(id).orElseGet(SecretValues::new);
+        for (MultipartFile f : files) {
+            String name = f.getOriginalFilename() == null ? "values.json" : f.getOriginalFilename();
+            Map<String, String> parsed;
+            try {
+                parsed = AkeylessValues.parse(mapper.readTree(f.getBytes()));
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException(name + " is not valid JSON: " + e.getOriginalMessage());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            if (parsed.isEmpty()) throw new IllegalArgumentException(name + " does not contain any path/value pairs.");
+            values.values.putAll(parsed);
+            values.files.remove(name);
+            values.files.add(name);
+        }
+        values.updatedAt = Instant.now();
+        store.saveSecretValues(id, values);
+        return new SecretValuesInfo(values.values.size(), values.files, values.updatedAt);
+    }
+
+    public void clearSecretValues(String id) {
+        get(id);
+        store.deleteSecretValues(id);
     }
 
     /**
@@ -142,9 +200,27 @@ public class FolderCompareService {
             left.addAll(EnvVarExtractor.extract(f, store.file(id, "left", f).orElse(null)));
             right.addAll(EnvVarExtractor.extract(f, store.file(id, "right", f).orElse(null)));
         }
-        EnvVarComparer.Result result = EnvVarComparer.compare(EnvVarExtractor.resolve(left), EnvVarExtractor.resolve(right));
+        SecretValues uploaded = store.secretValues(id).orElse(null);
+        AkeylessValues values = new AkeylessValues(uploaded == null ? null : uploaded.values);
+        List<EnvVarExtractor.EnvVar> l = values.apply(EnvVarExtractor.resolve(left));
+        List<EnvVarExtractor.EnvVar> r = values.apply(EnvVarExtractor.resolve(right));
+        EnvVarComparer.Result result = EnvVarComparer.compare(l, r);
+
+        int referenced = 0;
+        int resolved = 0;
+        List<MissingPath> missing = new ArrayList<>();
+        for (List<EnvVarExtractor.EnvVar> side : List.of(l, r)) {
+            for (EnvVarExtractor.EnvVar v : side) {
+                if (v.akeylessPath() == null || EnvVarExtractor.STATE_UNKNOWN.equals(v.valueState())) continue;
+                referenced++;
+                if (EnvVarExtractor.STATE_RESOLVED.equals(v.valueState())) resolved++;
+                else missing.add(new MissingPath(side == l ? "LEFT" : "RIGHT", v.name(), v.akeylessPath(), v.file(), v.line()));
+            }
+        }
+        SecretsSummary secrets = new SecretsSummary(uploaded == null ? 0 : uploaded.values.size(),
+                uploaded == null ? List.of() : uploaded.files, uploaded == null ? null : uploaded.updatedAt, referenced, resolved, missing);
         return new EnvView(path, folderScope ? "FOLDER" : "FILE", scopePath, !node.dir, files,
-                c.leftName, c.rightName, c.leftLabel, c.rightLabel, result.rows(), result.summary());
+                c.leftName, c.rightName, c.leftLabel, c.rightLabel, result.rows(), result.summary(), secrets);
     }
 
     private static Node find(Node root, String path) {

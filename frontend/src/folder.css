@@ -186,8 +186,58 @@
 .tb-purple { background: #f1e8fb; color: #7b3fa0; }
 
 /* ── environment variables grid (Excel-like) ── */
-.env-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 900px) { .env-filters { grid-template-columns: 1fr 1fr; } }
+.env-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1300px) { .env-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .env-filters { grid-template-columns: 1fr 1fr; } }
+.env-filter.zero .env-filter-count { opacity: .35; }
+.env-diff { color: #9a6700; } .env-unverified { color: #7b3fa0; }
+
+/* AKeyless values bar */
+.secrets-bar { background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.secrets-bar:not(.loaded) { border-color: #f2d58a; background: #fffdf5; }
+.secrets-main { display: flex; align-items: center; gap: 14px; padding: 10px 16px; flex-wrap: wrap; }
+.secrets-icon { font-size: 20px; }
+.secrets-text { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.secrets-title { font-weight: 600; font-size: 13.5px; }
+.secrets-text code { font-family: var(--mono); font-size: 11.5px; background: var(--gray-soft); border-radius: 4px; padding: 0 4px; }
+.secrets-meter { height: 5px; max-width: 360px; background: #eceef2; border-radius: 3px; overflow: hidden; margin-top: 3px; }
+.secrets-meter span { display: block; height: 100%; background: #2f9e5a; }
+.secrets-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.secrets-missing { border-top: 1px solid var(--line-soft); padding: 8px 16px 12px; max-height: 260px; overflow: auto; }
+.secrets-missing-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.secrets-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.secrets-table td { padding: 4px 8px; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.link-btn.warn { color: #a35a00; font-weight: 600; }
+
+/* env table */
+.env-xl .inj-chain { list-style: none; margin: 5px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.env-xl .inj-chain li { position: relative; padding-left: 14px; font-size: 11.5px; color: #3b4a5e; line-height: 1.45; }
+.env-xl .inj-chain li::before { content: "↳"; position: absolute; left: 0; color: var(--text-3); }
+.env-xl .inj-chain li:first-child::before { content: "•"; }
+.env-xl .inj-loc { display: block; font-size: 10.5px; color: var(--text-3); }
+.env-xl mark { background: #ffd8a8; color: inherit; border-radius: 2px; padding: 0 1px; }
+.val-state { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.val-state.ok { color: #1b7f45; }
+.val-state.warn { color: #a35a00; font-weight: 500; }
+.val-masked { letter-spacing: .08em; color: #6e6e73; }
+.xl td.xl-unknown { background: #faf6fd; }
+.xl td.xl-missing-alert { color: #b42318; font-style: normal; font-weight: 600; vertical-align: middle;
+  background: repeating-linear-gradient(135deg, #fff5f4 0 6px, #fdeceb 6px 12px); }
+.env-dup { margin-top: 6px; padding: 5px 7px; border-radius: 6px; background: #f4f6f9; font-size: 11.5px; }
+.env-dup.conflict { background: #fdecec; }
+.env-dup-title { font-weight: 600; color: #3b4a5e; }
+.env-dup.conflict .env-dup-title { color: #b42318; }
+.env-dup-item { margin-top: 3px; }
+.verdict { display: inline-block; font-weight: 600; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.v-same { background: #e3f5e8; color: #1b7f45; }
+.v-diff { background: #fff4c2; color: #7d5b00; }
+.v-unverified { background: #f1e8fb; color: #7b3fa0; }
+.v-missing { background: #b42318; color: #fff; }
+.env-v-left_only .xl-num, .env-v-right_only .xl-num { box-shadow: inset 3px 0 #d92d20; }
+.env-v-value_differs .xl-num { box-shadow: inset 3px 0 #e3b341; }
+.env-v-unverified .xl-num { box-shadow: inset 3px 0 #a371d6; }
+.env-v-same .xl-num { box-shadow: inset 3px 0 #2f9e5a; }
 .env-filter {
   display: flex; align-items: baseline; gap: 10px; border: 1.5px solid transparent; background: #fff; border-radius: 14px;
   box-shadow: var(--shadow); padding: 12px 16px; cursor: pointer; text-align: left; min-width: 0;

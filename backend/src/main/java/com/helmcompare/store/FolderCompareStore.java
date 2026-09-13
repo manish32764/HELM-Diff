@@ -2,6 +2,7 @@ package com.helmcompare.store;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.helmcompare.model.FolderCompare;
+import com.helmcompare.model.SecretValues;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -17,9 +18,11 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-/** Stores folder comparisons under data/folder-compares/{id}/ (compare.json, info.json, left/, right/). */
+/** Stores folder comparisons under data/folder-compares/{id}/ (compare.json, info.json, secret-values.json, left/, right/). */
 @Component
 public class FolderCompareStore {
+
+    private static final String SECRET_VALUES = "secret-values.json";
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -90,6 +93,32 @@ public class FolderCompareStore {
             return Optional.of(Files.readAllBytes(target));
         } catch (IOException e) {
             return Optional.empty();
+        }
+    }
+
+    public Optional<SecretValues> secretValues(String id) {
+        Path file = root.resolve(id).resolve(SECRET_VALUES);
+        if (!infos.containsKey(id) || !Files.isRegularFile(file)) return Optional.empty();
+        try {
+            return Optional.of(mapper.readValue(file.toFile(), SecretValues.class));
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
+
+    public void saveSecretValues(String id, SecretValues values) {
+        try {
+            mapper.writeValue(root.resolve(id).resolve(SECRET_VALUES).toFile(), values);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public void deleteSecretValues(String id) {
+        try {
+            Files.deleteIfExists(root.resolve(id).resolve(SECRET_VALUES));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 

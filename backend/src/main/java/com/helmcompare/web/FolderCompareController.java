@@ -64,8 +64,27 @@ public class FolderCompareController {
     @GetMapping("/{id}/env/export")
     public ResponseEntity<byte[]> envExport(@PathVariable String id, @RequestParam(defaultValue = "") String path,
                                             @RequestParam(defaultValue = "FILE") String scope,
-                                            @RequestParam(defaultValue = "xlsx") String format) {
-        return download(export.envExport(id, path, scope, format));
+                                            @RequestParam(defaultValue = "xlsx") String format,
+                                            @RequestParam(defaultValue = "false") boolean showSecrets) {
+        return download(export.envExport(id, path, scope, format, showSecrets));
+    }
+
+    @GetMapping("/{id}/secret-values")
+    public FolderCompareService.SecretValuesInfo secretValues(@PathVariable String id) {
+        return service.secretValuesInfo(id);
+    }
+
+    /** JSON with the actual value of each AKeyless path; several files are merged unless {@code replace}. */
+    @PostMapping(value = "/{id}/secret-values", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public FolderCompareService.SecretValuesInfo uploadSecretValues(@PathVariable String id,
+                                                                    @RequestParam("file") List<MultipartFile> file,
+                                                                    @RequestParam(defaultValue = "false") boolean replace) {
+        return service.uploadSecretValues(id, file, replace);
+    }
+
+    @DeleteMapping("/{id}/secret-values")
+    public void clearSecretValues(@PathVariable String id) {
+        service.clearSecretValues(id);
     }
 
     @DeleteMapping("/{id}")
