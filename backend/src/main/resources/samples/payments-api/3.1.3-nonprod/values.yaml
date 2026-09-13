@@ -1,0 +1,53 @@
+name: payments-api
+replicaCount: 1
+
+image:
+  repository: registry.example.com/payments-api
+  tag: "3.1.3"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  - name: SPRING_PROFILES_ACTIVE
+    value: "nonprod"
+  - name: DB_HOST
+    value: "payments-db-v2.nonprod.internal"
+  - name: DB_USER
+    value: "payments_app"
+  - name: DB_PASSWORD
+    value: "np-Passw0rd!"
+  - name: API_TOKEN
+    value: "np-token-12345"
+  - name: LOG_LEVEL
+    value: "DEBUG"
+  - name: CACHE_TTL_SECONDS
+    value: "60"
+  - name: FEATURE_FLAGS_URL
+    value: "https://flags.nonprod.internal"
+
+# Health probes became part of the base chart in 3.1.x
+probes:
+  liveness:
+    httpGet:
+      path: /actuator/health/liveness
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    httpGet:
+      path: /actuator/health/readiness
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
