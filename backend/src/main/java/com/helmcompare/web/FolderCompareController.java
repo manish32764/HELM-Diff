@@ -55,6 +55,19 @@ public class FolderCompareController {
         return service.file(id, path);
     }
 
+    @GetMapping("/{id}/env")
+    public FolderCompareService.EnvView env(@PathVariable String id, @RequestParam(defaultValue = "") String path,
+                                            @RequestParam(defaultValue = "FILE") String scope) {
+        return service.envVars(id, path, scope);
+    }
+
+    @GetMapping("/{id}/env/export")
+    public ResponseEntity<byte[]> envExport(@PathVariable String id, @RequestParam(defaultValue = "") String path,
+                                            @RequestParam(defaultValue = "FILE") String scope,
+                                            @RequestParam(defaultValue = "xlsx") String format) {
+        return download(export.envExport(id, path, scope, format));
+    }
+
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.delete(id);
@@ -62,7 +75,10 @@ public class FolderCompareController {
 
     @GetMapping("/{id}/export")
     public ResponseEntity<byte[]> export(@PathVariable String id, @RequestParam(defaultValue = "xlsx") String format) {
-        ExportService.Export e = export.export(id, format);
+        return download(export.export(id, format));
+    }
+
+    private static ResponseEntity<byte[]> download(ExportService.Export e) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename(e.fileName(), StandardCharsets.UTF_8).build().toString())

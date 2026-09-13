@@ -362,6 +362,53 @@ export interface LogicalDiff {
   rightEnd: number
 }
 
+export type EnvSource = 'PLAIN' | 'EMPTY' | 'TEMPLATE' | 'AKEYLESS' | 'K8S_SECRET' | 'EXTERNAL_SECRET' | 'VAULT' | 'CONFIGMAP' | 'FIELD_REF'
+
+export interface EnvVar {
+  name: string
+  value?: string
+  source: EnvSource
+  reference?: string
+  kind: string
+  file: string
+  line: number
+}
+
+export interface EnvRow {
+  id: string
+  status: 'COMMON' | 'LEFT_ONLY' | 'RIGHT_ONLY'
+  match?: 'SAME_NAME' | 'SIMILAR_NAME'
+  similarity?: number
+  left?: EnvVar
+  right?: EnvVar
+  comparison?: 'SAME' | 'VALUE_DIFFERS' | 'SOURCE_CHANGED'
+}
+
+export interface EnvView {
+  path: string
+  scope: 'FILE' | 'FOLDER'
+  scopePath: string
+  pathIsFile: boolean
+  files: string[]
+  leftName: string
+  rightName: string
+  leftLabel?: string
+  rightLabel?: string
+  rows: EnvRow[]
+  summary: {
+    total: number
+    common: number
+    leftOnly: number
+    rightOnly: number
+    similarNames: number
+    same: number
+    valueDiffers: number
+    sourceChanged: number
+    left: number
+    right: number
+  }
+}
+
 export interface FileView {
   path: string
   name: string

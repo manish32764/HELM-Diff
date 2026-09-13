@@ -16,19 +16,22 @@ export function scrollToLine(pane: HTMLDivElement | null, line: number) {
   if (el) pane.scrollTop = Math.max(0, el.offsetTop - pane.clientHeight / 3)
 }
 
-export const CodePane = memo(function CodePane({ lines, mode, marks, placeholder, paneRef, onScroll, onLineClick }: {
+export const CodePane = memo(function CodePane({ lines, mode, marks, placeholder, paneRef, onScroll, onActivate, onLineClick }: {
   lines?: string[]
   mode: Mode
   marks: Map<number, LineMark>
   placeholder?: ReactNode
   paneRef: RefObject<HTMLDivElement | null>
   onScroll?: (e: UIEvent<HTMLDivElement>) => void
+  /** Called when the user starts interacting with this pane (pointer, wheel, touch). */
+  onActivate?: () => void
   onLineClick?: (ids: string[]) => void
 }) {
   const tokens = useMemo(() => lines?.map((l) => highlight(l, mode)), [lines, mode])
 
   return (
-    <div className="code-pane" ref={paneRef} onScroll={onScroll}>
+    <div className="code-pane" ref={paneRef} onScroll={onScroll}
+      onMouseEnter={onActivate} onWheel={onActivate} onTouchStart={onActivate} onFocus={onActivate} tabIndex={-1}>
       {!lines || placeholder ? (
         <div className="code-placeholder">{placeholder}</div>
       ) : (

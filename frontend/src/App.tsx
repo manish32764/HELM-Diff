@@ -4,6 +4,7 @@ import { ToastProvider } from './components/ui'
 import { useRoute } from './lib/router'
 import { AnalysisPage } from './pages/AnalysisPage'
 import { ChartsPage } from './pages/ChartsPage'
+import { EnvVarsPage } from './pages/EnvVarsPage'
 import { FileComparePage } from './pages/FileComparePage'
 import { FolderHomePage } from './pages/FolderHomePage'
 import { FolderTreePage } from './pages/FolderTreePage'
@@ -68,10 +69,15 @@ export default function App() {
     switch (first) {
       case '': return <FolderHomePage />
       case 'folders':
-        return route.segments[2] === 'file'
-          ? <FileComparePage key={route.query.get('path') ?? ''} id={route.segments[1]} path={route.query.get('path') ?? ''}
-              initialDiff={route.query.get('diff') ?? undefined} />
-          : <FolderTreePage key={route.segments[1]} id={route.segments[1]} />
+        if (route.segments[2] === 'file') {
+          return <FileComparePage key={route.query.get('path') ?? ''} id={route.segments[1]} path={route.query.get('path') ?? ''}
+            initialDiff={route.query.get('diff') ?? undefined} />
+        }
+        if (route.segments[2] === 'env') {
+          return <EnvVarsPage key={`${route.query.get('path')}|${route.query.get('scope')}`} id={route.segments[1]}
+            path={route.query.get('path') ?? ''} scope={route.query.get('scope') ?? undefined} />
+        }
+        return <FolderTreePage key={route.segments[1]} id={route.segments[1]} />
       case 'analyses': return <HomePage />
       case 'charts': return <ChartsPage />
       case 'compare': return <PairwisePage key={route.query.toString()} route={route} />
@@ -89,7 +95,7 @@ export default function App() {
     if (to === '/history') return first === 'history' || first === 'analysis'
     return `/${first}` === to
   }
-  const fill = first === 'folders'
+  const mainClass = first !== 'folders' ? '' : route.segments[2] ? 'compact' : 'fill'
 
   return (
     <ToastProvider>
@@ -122,7 +128,7 @@ export default function App() {
             ))}
             <div className="sidebar-foot">Press [ to collapse or expand this panel.</div>
           </nav>
-          <main className={`main ${fill ? 'fill' : ''}`}>{page}</main>
+          <main className={`main ${mainClass}`}>{page}</main>
         </div>
       </SourceViewerProvider>
     </ToastProvider>

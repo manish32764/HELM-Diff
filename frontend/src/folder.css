@@ -171,21 +171,81 @@
 .tk-tpl-num { color: #098658; }
 .tk-tpl-op { color: #393a34; }
 
+/* ── scrollable file & env pages ── */
+.main.compact { padding: 14px 22px 16px; }
+.fc-page, .env-page { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* The code view is exactly one screen tall: scroll the page down and only the two files remain visible. */
+.split-view.screen { flex: none; height: calc(100vh - 20px); min-height: 420px; }
+.code-pane, .tree-pane, .xl-wrap { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.tree-env {
+  margin-left: 6px; border: 1px solid #b9d3f5; background: #eef5fe; color: #0a5dc2; border-radius: 5px;
+  font: 600 10px/1.6 var(--mono); letter-spacing: .05em; padding: 0 6px; cursor: pointer; opacity: .75;
+}
+.tree-env:hover { opacity: 1; background: #dcebfd; }
+.tb-blue { background: #e3eefc; color: #0a5dc2; }
+.tb-purple { background: #f1e8fb; color: #7b3fa0; }
+
+/* ── environment variables grid (Excel-like) ── */
+.env-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 900px) { .env-filters { grid-template-columns: 1fr 1fr; } }
+.env-filter {
+  display: flex; align-items: baseline; gap: 10px; border: 1.5px solid transparent; background: #fff; border-radius: 14px;
+  box-shadow: var(--shadow); padding: 12px 16px; cursor: pointer; text-align: left; min-width: 0;
+}
+.env-filter:hover { border-color: var(--line); }
+.env-filter-count { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.env-filter-label { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-filter.active { border-color: currentColor; }
+.env-all { color: #1d1d1f; } .env-common { color: #1b7f45; } .env-left { color: #b86e00; } .env-right { color: #2563eb; }
+.env-filter.active .env-filter-label { color: inherit; font-weight: 500; }
+
+.xl-wrap { overflow: auto; max-height: calc(100vh - 120px); background: #fff; border: 1px solid #d0d7de; border-radius: 10px; box-shadow: var(--shadow); }
+table.xl { width: 100%; min-width: 980px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+.xl th {
+  position: sticky; top: 0; z-index: 2; background: #f3f6fb; color: #3b4a5e; font-weight: 600; text-align: left;
+  padding: 7px 10px; border-bottom: 1px solid #d0d7de; border-right: 1px solid #e1e5eb; font-size: 11.5px;
+}
+.xl thead tr:nth-child(2) th { top: 31px; }
+.xl .xl-group th { text-transform: uppercase; letter-spacing: .05em; font-family: var(--mono); color: #1f4f96; height: 31px; }
+.xl td { padding: 7px 10px; border-bottom: 1px solid #e6e9ee; border-right: 1px solid #eef0f3; vertical-align: top; overflow-wrap: anywhere; }
+.xl .xl-num { width: 46px; text-align: center; color: var(--text-3); background: #fafbfc; font-variant-numeric: tabular-nums; }
+.xl .xl-right-start { border-left: 2px solid #c3cbd6; }
+.xl-row:hover td { background: #f6f9fe; }
+.xl-name { font-family: var(--mono); font-weight: 600; color: #1f2328; }
+.xl-meta { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.xl-value { font-family: var(--mono); white-space: pre-wrap; color: #0451a5; }
+.xl-ref { font-family: var(--mono); font-size: 11.5px; color: #6e6e73; margin-top: 2px; white-space: pre-wrap; }
+.xl td.xl-changed { background: #fff8dc; }
+.xl-row:hover td.xl-changed { background: #fff1c2; }
+.xl td.xl-missing { color: var(--text-3); font-style: italic; text-align: center; background: repeating-linear-gradient(135deg, #fbfbfc 0 6px, #f3f3f5 6px 12px); }
+.xl-left_only .xl-num { box-shadow: inset 3px 0 #f5a524; }
+.xl-right_only .xl-num { box-shadow: inset 3px 0 #3b82f6; }
+.xl-common .xl-num { box-shadow: inset 3px 0 #2f9e5a; }
+.xl-empty { text-align: center; color: var(--text-2); padding: 30px !important; }
+.xl .tbadge { white-space: normal; text-align: left; }
+
 /* ── logical difference panel ── */
 .diff-panel { background: #fff; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); max-height: 30vh; display: flex; flex-direction: column; min-height: 0; }
 .diff-panel-head { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
 .diff-list { overflow: auto; }
 .diff-empty { padding: 16px; color: var(--text-2); }
-.diff-item {
-  display: grid; grid-template-columns: 82px minmax(160px, 34%) minmax(0, 1fr) auto; gap: 12px; align-items: center;
-  width: 100%; text-align: left; border: 0; background: none; padding: 7px 14px; cursor: pointer; border-bottom: 1px solid var(--line-soft);
+/* Configuration, left value and right value get equal widths. */
+.diff-row {
+  display: grid; grid-template-columns: 86px repeat(3, minmax(0, 1fr)) 120px; gap: 14px; align-items: start;
+  width: 100%; text-align: left; border: 0; background: none; padding: 7px 14px; border-bottom: 1px solid var(--line-soft);
   font-size: 12.5px;
 }
+.diff-header {
+  position: sticky; top: 0; z-index: 1; background: #f7f8fa; font-size: 11px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .05em; padding-top: 6px; padding-bottom: 6px;
+}
+.diff-header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-item { cursor: pointer; }
 .diff-item:hover { background: #f5f7fb; }
 .diff-item.selected { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
-.diff-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.diff-values { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-.diff-values .old, .diff-values .new { overflow: hidden; text-overflow: ellipsis; max-width: 48%; font-size: 12px; }
+.diff-cell { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; max-height: 6.2em; overflow: hidden; }
+.diff-cell.mono { font-size: 12px; }
+.diff-cell .old, .diff-cell .new { display: inline; font-size: 12px; line-height: 1.6; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 3px; vertical-align: middle; }
 .sw-added { background: #ccffd8; box-shadow: inset 3px 0 #2da44e; }
 .sw-removed { background: #ffd7d5; box-shadow: inset 3px 0 #cf222e; }

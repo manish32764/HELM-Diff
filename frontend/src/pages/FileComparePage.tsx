@@ -17,10 +17,12 @@ const STATUS_TEXT: Record<string, [string, string]> = {
   RIGHT_ONLY: ['Right only', 'tb-solid-blue'],
 }
 
+type Side = 'left' | 'right'
+
 /** `initialDiff` (from `&diff=` in the URL) opens the page with differences shown: "all" or a difference id. */
 export function FileComparePage({ id, path, initialDiff }: { id: string; path: string; initialDiff?: string }) {
   const view = useAsync(() => api.folderFile(id, path), [id, path])
-  const back = () => navigate(`/folders/${id}`)
+  const back = useCallback(() => navigate(`/folders/${id}`), [id])
 
   if (view.loading) return <Spinner />
   if (view.error) {
@@ -31,23 +33,19 @@ export function FileComparePage({ id, path, initialDiff }: { id: string; path: s
       </div>
     )
   }
-  return <FileCompare view={view.data!} onBack={back} initialDiff={initialDiff} />
+  return <FileCompare id={id} view={view.data!} onBack={back} initialDiff={initialDiff} />
 }
 
-function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: () => void; initialDiff?: string }) {
-  useEffect(() => {
-    if (!initialDiff) return
-    const d = view.differences.find((x) => x.id === initialDiff)
-    if (d) select(d)
-    else setShowDiffs(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: FileView; onBack: () => void; initialDiff?: string }) {
   const [showDiffs, setShowDiffs] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [sync, setSync] = useState(true)
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
-  const syncing = useRef(false)
+  const splitRef = useRef<HTMLDivElement>(null)
+  /** The pane the user is interacting with; only it drives the other pane, so they never fight. */
+  const activePane = useRef<Side | null>(null)
+  const programmatic = useRef(false)
   const diffs = view.differences
   const mode = modeFor(view.name)
 
@@ -78,14 +76,21 @@ function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: ()
   const select = useCallback((d: LogicalDiff) => {
     setShowDiffs(true)
     setSelected(d.id)
-    syncing.current = true
+    programmatic.current = true
     requestAnimationFrame(() => {
       scrollToLine(leftRef.current, d.leftStart)
       scrollToLine(rightRef.current, d.rightStart)
-      setTimeout(() => { syncing.current = false }, 80)
+      setTimeout(() => { programmatic.current = false }, 120)
     })
     document.querySelector(`[data-diff="${d.id}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [])
+
+  useEffect(() => {
+    if (!initialDiff) return
+    const d = view.differences.find((x) => x.id === initialDiff)
+    if (d) select(d)
+    else setShowDiffs(true)
+  }, [initialDiff, view.differences, select])
 
   const index = diffs.findIndex((d) => d.id === selected)
   const step = useCallback((delta: number) => {
@@ -98,22 +103,20 @@ function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: ()
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
-      if (e.key === 'n' || e.key === 'ArrowDown' && e.altKey) step(1)
-      if (e.key === 'p' || e.key === 'ArrowUp' && e.altKey) step(-1)
+      if (e.key === 'n') step(1)
+      if (e.key === 'p') step(-1)
       if (e.key === 'Backspace' || (e.key === 'ArrowLeft' && e.altKey)) onBack()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [step, onBack])
 
-  const onScroll = (source: 'left' | 'right') => {
-    if (!sync || syncing.current) return
+  const onScroll = (source: Side) => {
+    if (!sync || programmatic.current) return
+    if (activePane.current !== null && activePane.current !== source) return
     const from = source === 'left' ? leftRef.current : rightRef.current
     const to = source === 'left' ? rightRef.current : leftRef.current
-    if (!from || !to) return
-    syncing.current = true
-    to.scrollTop = from.scrollTop
-    requestAnimationFrame(() => { syncing.current = false })
+    if (from && to && to.scrollTop !== from.scrollTop) to.scrollTop = from.scrollTop
   }
 
   const onLineClick = (ids: string[]) => {
@@ -121,10 +124,13 @@ function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: ()
     if (d) select(d)
   }
 
+  const openEnv = () => navigate(`/folders/${id}/env?path=${encodeURIComponent(view.path)}&scope=FILE`)
+  const codeOnly = () => splitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
   const [statusText, statusClass] = STATUS_TEXT[view.status] ?? [view.status, 'tb-gray']
 
   return (
-    <div className="page-fill">
+    <div className="fc-page">
       <div className="fc-bar">
         <Button onClick={onBack}>← Back to folders</Button>
         <div className="fc-path" title={view.path}>
@@ -137,6 +143,8 @@ function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: ()
         <span className="small muted fc-reason">{view.reason}</span>
         <div className="spacer" />
         <Toggle checked={sync} onChange={setSync} label="Scroll together" />
+        <Button onClick={openEnv} title="Compare environment variables and secrets side by side">⊞ Env variables &amp; secrets</Button>
+        <Button onClick={codeOnly} title="Scroll down so only the two files are visible">⤓ Code only</Button>
         {showDiffs && diffs.length > 0 && (
           <div className="row" style={{ gap: 6 }}>
             <Button size="sm" onClick={() => step(-1)} title="Previous difference (p)">▲</Button>
@@ -151,22 +159,24 @@ function FileCompare({ view, onBack, initialDiff }: { view: FileView; onBack: ()
 
       {showDiffs && <DiffPanel view={view} selected={selected} onSelect={select} />}
 
-      <div className="split-view">
+      <div className="split-view screen" ref={splitRef}>
         <PaneHeader side="Left" root={view.leftName} label={view.leftLabel} state={view.leftState} />
         <div className="split-divider" />
         <PaneHeader side="Right" root={view.rightName} label={view.rightLabel} state={view.rightState} />
 
         <CodePane lines={view.leftLines} mode={mode} marks={marks.left} paneRef={leftRef}
-          placeholder={placeholder(view, 'left')} onScroll={() => onScroll('left')} onLineClick={onLineClick} />
+          placeholder={placeholder(view, 'left')} onScroll={() => onScroll('left')}
+          onActivate={() => { activePane.current = 'left' }} onLineClick={onLineClick} />
         <div className="split-divider" />
         <CodePane lines={view.rightLines} mode={mode} marks={marks.right} paneRef={rightRef}
-          placeholder={placeholder(view, 'right')} onScroll={() => onScroll('right')} onLineClick={onLineClick} />
+          placeholder={placeholder(view, 'right')} onScroll={() => onScroll('right')}
+          onActivate={() => { activePane.current = 'right' }} onLineClick={onLineClick} />
       </div>
     </div>
   )
 }
 
-function placeholder(view: FileView, side: 'left' | 'right'): ReactNode | undefined {
+function placeholder(view: FileView, side: Side): ReactNode | undefined {
   const state = side === 'left' ? view.leftState : view.rightState
   const root = side === 'left' ? view.leftName : view.rightName
   if (state === 'MISSING') return <><b>File does not exist</b><span>{view.path} is not in {root}</span></>
@@ -193,7 +203,7 @@ function DiffPanel({ view, selected, onSelect }: { view: FileView; selected: str
     <div className="diff-panel">
       <div className="diff-panel-head">
         <b>Logical differences</b>
-        <span className="small muted">Click a difference to highlight its lines in both files</span>
+        <span className="small muted">Click a row to highlight its lines in both files</span>
         <div className="spacer" />
         <span className="legend">
           <span><span className="swatch sw-added" />Added (right)</span>
@@ -211,18 +221,28 @@ function DiffPanel({ view, selected, onSelect }: { view: FileView; selected: str
         </div>
       ) : (
         <div className="diff-list">
+          <div className="diff-row diff-header">
+            <span>Change</span>
+            <span>Configuration</span>
+            <span>Left value · {view.leftName}</span>
+            <span>Right value · {view.rightName}</span>
+            <span>Lines</span>
+          </div>
           {diffs.map((d) => (
-            <button key={d.id} data-diff={d.id} className={`diff-item ${d.id === selected ? 'selected' : ''}`} onClick={() => onSelect(d)}>
-              <span className={`tbadge ${d.kind === 'ADDED' ? 'tb-green' : d.kind === 'REMOVED' ? 'tb-red' : 'tb-amber'}`}>
-                {d.kind === 'ADDED' ? 'Added' : d.kind === 'REMOVED' ? 'Removed' : 'Changed'}
+            <button key={d.id} data-diff={d.id} className={`diff-row diff-item ${d.id === selected ? 'selected' : ''}`} onClick={() => onSelect(d)}>
+              <span>
+                <span className={`tbadge ${d.kind === 'ADDED' ? 'tb-green' : d.kind === 'REMOVED' ? 'tb-red' : 'tb-amber'}`}>
+                  {d.kind === 'ADDED' ? 'Added' : d.kind === 'REMOVED' ? 'Removed' : 'Changed'}
+                </span>
               </span>
-              <span className="diff-path mono" title={d.path}>{d.path}</span>
-              <span className="diff-values">
-                {d.left !== undefined && d.left !== null && <span className="old" title={d.left}>{oneLine(d.left)}</span>}
-                {d.kind === 'CHANGED' && <span className="faint">→</span>}
-                {d.right !== undefined && d.right !== null && <span className="new" title={d.right}>{oneLine(d.right)}</span>}
+              <span className="diff-cell mono" title={d.path}>{d.path}</span>
+              <span className="diff-cell">
+                {d.left !== undefined && d.left !== null ? <span className="old">{d.left}</span> : <span className="faint">—</span>}
               </span>
-              <span className="diff-lines small faint nowrap">
+              <span className="diff-cell">
+                {d.right !== undefined && d.right !== null ? <span className="new">{d.right}</span> : <span className="faint">—</span>}
+              </span>
+              <span className="small faint nowrap">
                 {d.leftStart > 0 ? `L${range(d.leftStart, d.leftEnd)}` : ''}
                 {d.leftStart > 0 && d.rightStart > 0 ? ' ↔ ' : ''}
                 {d.rightStart > 0 ? `R${range(d.rightStart, d.rightEnd)}` : ''}
@@ -237,9 +257,4 @@ function DiffPanel({ view, selected, onSelect }: { view: FileView; selected: str
 
 function range(a: number, b: number) {
   return a === b || b <= 0 ? `${a}` : `${a}–${b}`
-}
-
-function oneLine(s: string) {
-  const t = s.replace(/\s*\n\s*/g, ' ⏎ ')
-  return t.length > 90 ? `${t.slice(0, 89)}…` : t
 }

@@ -1,5 +1,7 @@
 package com.helmcompare.service;
 
+import com.helmcompare.diff.EnvVarComparer;
+import com.helmcompare.diff.EnvVarExtractor;
 import com.helmcompare.diff.LogicalFileComparer;
 import com.helmcompare.model.FolderCompare;
 import com.helmcompare.model.FolderCompare.Node;
@@ -111,6 +113,62 @@ public class FolderCompareService {
         String name = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
         return new FileView(path, name, status, reason, leftState, rightState, binary,
                 lines(lb, binary), lines(rb, binary), diffs, c.leftName, c.rightName, c.leftLabel, c.rightLabel);
+    }
+
+    public record EnvView(String path, String scope, String scopePath, boolean pathIsFile, List<String> files,
+                          String leftName, String rightName, String leftLabel, String rightLabel,
+                          List<EnvVarComparer.Row> rows, EnvVarComparer.Summary summary) {
+    }
+
+    /**
+     * Environment variables and secrets of a file, or of the whole microservice folder containing it.
+     *
+     * @param scope FILE or FOLDER
+     */
+    public EnvView envVars(String id, String path, String scope) {
+        FolderCompare c = get(id);
+        Node node = find(c.root, path);
+        if (node == null) throw new NotFoundException("Not found: " + path);
+        boolean folderScope = "FOLDER".equalsIgnoreCase(scope) || node.dir;
+        String scopePath = !folderScope ? path : node.dir ? path : (path.contains("/") ? path.substring(0, path.indexOf('/')) : "");
+        Node scopeNode = scopePath.isEmpty() ? c.root : find(c.root, scopePath);
+        List<String> files = new ArrayList<>();
+        if (!folderScope) files.add(path);
+        else collectFiles(scopeNode, files);
+
+        List<EnvVarExtractor.EnvVar> left = new ArrayList<>();
+        List<EnvVarExtractor.EnvVar> right = new ArrayList<>();
+        for (String f : files) {
+            left.addAll(EnvVarExtractor.extract(f, store.file(id, "left", f).orElse(null)));
+            right.addAll(EnvVarExtractor.extract(f, store.file(id, "right", f).orElse(null)));
+        }
+        EnvVarComparer.Result result = EnvVarComparer.compare(EnvVarExtractor.resolve(left), EnvVarExtractor.resolve(right));
+        return new EnvView(path, folderScope ? "FOLDER" : "FILE", scopePath, !node.dir, files,
+                c.leftName, c.rightName, c.leftLabel, c.rightLabel, result.rows(), result.summary());
+    }
+
+    private static Node find(Node root, String path) {
+        if (path == null || path.isEmpty()) return root;
+        Node current = root;
+        StringBuilder prefix = new StringBuilder();
+        for (String segment : path.split("/")) {
+            if (!prefix.isEmpty()) prefix.append('/');
+            prefix.append(segment);
+            if (current.children == null) return null;
+            String target = prefix.toString();
+            current = current.children.stream().filter(ch -> ch.path.equals(target)).findFirst().orElse(null);
+            if (current == null) return null;
+        }
+        return current;
+    }
+
+    private static void collectFiles(Node node, List<String> out) {
+        if (node == null) return;
+        if (!node.dir) {
+            out.add(node.path);
+            return;
+        }
+        node.children.forEach(ch -> collectFiles(ch, out));
     }
 
     // ───────────────────────────── tree ─────────────────────────────

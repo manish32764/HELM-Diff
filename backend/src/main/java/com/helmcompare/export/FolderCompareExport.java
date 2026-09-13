@@ -93,6 +93,70 @@ public class FolderCompareExport {
         };
     }
 
+    public ExportService.Export envExport(String id, String path, String scope, String format) {
+        FolderCompareService.EnvView view = service.envVars(id, path, scope);
+        String left = view.leftName() + (view.leftLabel() == null ? "" : " (" + view.leftLabel() + ")");
+        String right = view.rightName() + (view.rightLabel() == null ? "" : " (" + view.rightLabel() + ")");
+        String scopeText = "FOLDER".equals(view.scope()) ? "folder " + (view.scopePath().isEmpty() ? "(all)" : view.scopePath()) : "file " + view.path();
+        String title = "Environment variables · " + scopeText;
+
+        List<String[]> meta = new ArrayList<>();
+        meta.add(new String[]{"Left folder", left});
+        meta.add(new String[]{"Right folder", right});
+        meta.add(new String[]{"Scope", scopeText});
+        meta.add(new String[]{"Common", String.valueOf(view.summary().common())});
+        meta.add(new String[]{"Only in left", String.valueOf(view.summary().leftOnly())});
+        meta.add(new String[]{"Only in right", String.valueOf(view.summary().rightOnly())});
+        meta.add(new String[]{"Matched by similar name", String.valueOf(view.summary().similarNames())});
+        meta.add(new String[]{"Source changed (e.g. plain → AKeyless)", String.valueOf(view.summary().sourceChanged())});
+        meta.add(new String[]{"Value differs", String.valueOf(view.summary().valueDiffers())});
+
+        List<List<String>> rows = new ArrayList<>();
+        int n = 0;
+        for (var r : view.rows()) {
+            n++;
+            rows.add(List.of(String.valueOf(n),
+                    r.left() == null ? "" : r.left().name(), r.left() == null ? "" : valueText(r.left()), r.left() == null ? "" : sourceText(r.left().source()),
+                    r.right() == null ? "" : r.right().name(), r.right() == null ? "" : valueText(r.right()), r.right() == null ? "" : sourceText(r.right().source()),
+                    r.status(),
+                    r.comparison() == null ? "" : r.comparison(),
+                    "SIMILAR_NAME".equals(r.match()) ? "Similar name (" + r.similarity() + "%)" : r.match() == null ? "" : "Same name",
+                    r.left() == null ? "" : r.left().file() + ":" + r.left().line(),
+                    r.right() == null ? "" : r.right().file() + ":" + r.right().line()));
+        }
+        ExportService.Report report = new ExportService.Report(title, meta, List.of(new ExportService.Table("Environment Variables",
+                List.of("#", "Left variable", "Left value", "Left source", "Right variable", "Right value", "Right source",
+                        "Status", "Comparison", "Name match", "Left location", "Right location"), rows, Set.of(7, 8))));
+        String base = slug("env " + view.leftName() + " vs " + view.rightName() + " " + (view.scopePath().isEmpty() ? view.path() : view.scopePath())) + "-" + id;
+        return switch (format.toLowerCase(Locale.ROOT)) {
+            case "csv" -> new ExportService.Export(base + ".csv", "text/csv;charset=UTF-8", exports.csv(report));
+            case "html" -> new ExportService.Export(base + ".html", "text/html;charset=UTF-8", exports.html(report));
+            case "xlsx" -> new ExportService.Export(base + ".xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", exports.xlsx(report));
+            default -> throw new IllegalArgumentException("Unsupported export format: " + format);
+        };
+    }
+
+    private static String valueText(com.helmcompare.diff.EnvVarExtractor.EnvVar v) {
+        if (v.reference() == null || v.reference().isBlank()) return nz(v.value());
+        return v.value() == null || v.value().isBlank() ? v.reference() : v.value() + "  [" + v.reference() + "]";
+    }
+
+    private static String sourceText(String source) {
+        return switch (source) {
+            case "PLAIN" -> "Plain text";
+            case "AKEYLESS" -> "AKeyless";
+            case "K8S_SECRET" -> "K8s Secret";
+            case "EXTERNAL_SECRET" -> "External secret";
+            case "CONFIGMAP" -> "ConfigMap";
+            case "FIELD_REF" -> "Field ref";
+            case "TEMPLATE" -> "Helm template";
+            case "EMPTY" -> "Empty";
+            case "VAULT" -> "Vault";
+            default -> source;
+        };
+    }
+
     private static void collect(Node node, List<List<String>> rows, List<String> differing) {
         for (Node child : node.children) {
             if (child.dir) {

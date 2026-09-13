@@ -1,5 +1,5 @@
 import type {
-  AnalysisRecord, AnalysisSummary, ChartRecord, ConfigItem, Expectation, FileView, FolderCompare, FolderCompareInfo,
+  AnalysisRecord, AnalysisSummary, ChartRecord, ConfigItem, EnvView, Expectation, FileView, FolderCompare, FolderCompareInfo,
   PortfolioRecord, SearchHit, SourceView,
 } from './types'
 
@@ -91,4 +91,8 @@ export const api = {
     request<FileView>(`/api/folder-compares/${id}/file?path=${encodeURIComponent(path)}`),
   deleteFolderCompare: (id: string) => request<void>(`/api/folder-compares/${id}`, { method: 'DELETE' }),
   folderExportUrl: (id: string, format: string) => `/api/folder-compares/${id}/export?format=${format}`,
+  folderEnv: (id: string, path: string, scope: 'FILE' | 'FOLDER') =>
+    request<EnvView>(`/api/folder-compares/${id}/env?path=${encodeURIComponent(path)}&scope=${scope}`),
+  folderEnvExportUrl: (id: string, path: string, scope: string, format: string) =>
+    `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}`,
 }

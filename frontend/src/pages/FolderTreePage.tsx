@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { UIEvent, WheelEvent } from 'react'
+import type { RefObject, WheelEvent } from 'react'
 import { api } from '../api/client'
 import type { FolderCompare, FolderNode } from '../api/types'
 import { ExportMenu } from '../components/ExportMenu'
@@ -18,6 +18,7 @@ interface Row {
   number?: number
 }
 
+const ROW_HEIGHT = 34
 const storageKey = (id: string, what: string) => `folder-compare:${id}:${what}`
 
 function load<T>(key: string, fallback: T): T {
@@ -61,23 +62,25 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
   const gutterRef = useRef<HTMLDivElement>(null)
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
-  const syncing = useRef(false)
+  /** Only the scroller the user is interacting with drives the others, so they never fight (smooth trackpad scrolling). */
+  const active = useRef<HTMLDivElement | null>(null)
 
-  const syncFrom = (source: HTMLDivElement) => {
-    if (syncing.current) return
-    syncing.current = true
+  const mirror = (source: HTMLDivElement) => {
     for (const el of [gutterRef.current, leftRef.current, rightRef.current]) {
-      if (el && el !== source) el.scrollTop = source.scrollTop
+      if (el && el !== source && el.scrollTop !== source.scrollTop) el.scrollTop = source.scrollTop
     }
-    requestAnimationFrame(() => { syncing.current = false })
+  }
+  const onPaneScroll = (source: HTMLDivElement) => {
+    if (active.current && active.current !== source) return
+    mirror(source)
   }
 
   useEffect(() => {
     if (!lastOpened) return
     const index = rows.findIndex((r) => r.node.path === lastOpened)
     if (index >= 0 && leftRef.current) {
-      leftRef.current.scrollTop = Math.max(0, index * 34 - leftRef.current.clientHeight / 3)
-      syncFrom(leftRef.current)
+      leftRef.current.scrollTop = Math.max(0, index * ROW_HEIGHT - leftRef.current.clientHeight / 3)
+      mirror(leftRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -94,6 +97,10 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
   const open = useCallback((path: string) => {
     save(storageKey(id, 'last'), path)
     navigate(`/folders/${id}/file?path=${encodeURIComponent(path)}`)
+  }, [id])
+
+  const openEnv = useCallback((path: string) => {
+    navigate(`/folders/${id}/env?path=${encodeURIComponent(path)}&scope=FOLDER`)
   }, [id])
 
   const expandAll = () => setExpanded(new Set(allDirs(compare.root)))
@@ -165,7 +172,13 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
 
         <div className="tree-body" onMouseLeave={() => setHover(null)}>
           <div className="tree-gutter" ref={gutterRef}
-            onWheel={(e: WheelEvent<HTMLDivElement>) => { if (leftRef.current) { leftRef.current.scrollTop += e.deltaY; syncFrom(leftRef.current) } }}>
+            onWheel={(e: WheelEvent<HTMLDivElement>) => {
+              const left = leftRef.current
+              if (!left) return
+              active.current = left
+              left.scrollTop += e.deltaY
+              mirror(left)
+            }}>
             <div className="tree-rows">
               {rows.map((r, i) => (
                 <div key={r.node.path} className={`tree-row gutter ${hover === i ? 'hover' : ''} ${r.node.path === lastOpened ? 'last' : ''}`}
@@ -176,11 +189,15 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
               ))}
             </div>
           </div>
-          {(['left', 'right'] as Side[]).map((side, k) => (
-            <TreePane key={side} side={side} rows={rows} expanded={expanded} hover={hover} lastOpened={lastOpened}
-              paneRef={k === 0 ? leftRef : rightRef} divider={k === 1}
-              onScroll={(e) => syncFrom(e.currentTarget)} onHover={setHover} onToggle={toggle} onOpen={open} />
-          ))}
+          {(['left', 'right'] as Side[]).map((side, k) => {
+            const ref = k === 0 ? leftRef : rightRef
+            return (
+              <TreePane key={side} side={side} rows={rows} expanded={expanded} hover={hover} lastOpened={lastOpened}
+                paneRef={ref} divider={k === 1}
+                onActivate={() => { active.current = ref.current }}
+                onScroll={(el) => onPaneScroll(el)} onHover={setHover} onToggle={toggle} onOpen={open} onEnv={openEnv} />
+            )
+          })}
           {rows.length === 0 && <div className="tree-empty">Nothing matches the current filter.</div>}
         </div>
       </div>
@@ -192,28 +209,32 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
         <span><span className="dot dot-orange" />One side only</span>
         <span><FolderIcon tone="green" /> all files identical</span>
         <span><FolderIcon tone="yellow" /> something differs</span>
+        <span className="tbadge tb-blue">ENV</span><span>compare env variables &amp; secrets of a microservice</span>
       </div>
     </div>
   )
 }
 
-function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, onScroll, onHover, onToggle, onOpen }: {
+function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, onActivate, onScroll, onHover, onToggle, onOpen, onEnv }: {
   side: Side
   rows: Row[]
   expanded: Set<string>
   hover: number | null
   lastOpened: string
-  paneRef: React.RefObject<HTMLDivElement | null>
+  paneRef: RefObject<HTMLDivElement | null>
   divider: boolean
-  onScroll: (e: UIEvent<HTMLDivElement>) => void
+  onActivate: () => void
+  onScroll: (el: HTMLDivElement) => void
   onHover: (i: number) => void
   onToggle: (path: string) => void
   onOpen: (path: string) => void
+  onEnv: (path: string) => void
 }) {
   return (
     <>
       {divider && <div className="split-divider" />}
-      <div className="tree-pane" ref={paneRef} onScroll={onScroll}>
+      <div className="tree-pane" ref={paneRef} onScroll={(e) => onScroll(e.currentTarget)}
+        onMouseEnter={onActivate} onWheel={onActivate} onTouchStart={onActivate}>
         <div className="tree-rows">
           {rows.map((r, i) => {
             const n = r.node
@@ -237,6 +258,10 @@ function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, o
                 <span className="tree-name">{n.name}</span>
                 <TreeBadge node={n} side={side} />
                 {n.dir && <span className="tree-counts">{dirCounts(n)}</span>}
+                {n.dir && r.depth === 0 && side === 'left' && (
+                  <button className="tree-env" title="Compare environment variables & secrets of this microservice"
+                    onClick={(e) => { e.stopPropagation(); onEnv(n.path) }}>ENV</button>
+                )}
               </div>
             )
           })}
