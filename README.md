@@ -10,9 +10,33 @@ HELM-Compare/
 └── frontend/   React 19 · TypeScript · Vite 7      (light, Apple-inspired UI)
 ```
 
-## Run
+## Run with Docker (recommended)
 
-**Backend** (port 8080)
+Requires Docker Desktop (running).
+
+```powershell
+docker compose up -d --build
+```
+
+| Service | URL | Container |
+|---|---|---|
+| Frontend (nginx, proxies `/api` to the backend) | http://localhost:5173 | `helm-compare-frontend` |
+| Backend API | http://localhost:32764/api/health | `helm-compare-backend` |
+
+Data is kept in the Docker volume `helm-compare-data`, so it survives restarts.
+
+```powershell
+docker compose logs -f          # follow logs
+docker compose down             # stop (keeps data)
+docker compose down -v          # stop and delete data
+```
+
+The frontend waits until the backend health check passes. The backend heap is capped at 768 MB
+(`JAVA_OPTS` in `docker-compose.yml`).
+
+## Run without Docker
+
+**Backend** (port 32764)
 
 ```powershell
 cd backend

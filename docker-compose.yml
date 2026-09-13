@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: helm-compare-backend
+    ports:
+      - "32764:32764"
+    environment:
+      SERVER_PORT: "32764"
+      HELMCOMPARE_DATA_DIR: /data
+      HELMCOMPARE_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      JAVA_OPTS: "-Xmx768m"
+    volumes:
+      - helm-compare-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: helm-compare-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      BACKEND_URL: http://backend:32764
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  helm-compare-data:
