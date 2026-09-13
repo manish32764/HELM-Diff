@@ -398,7 +398,9 @@ export interface EnvRow {
   duplicateConflict: boolean
 }
 
-export interface SecretValuesInfo { paths: number; files: string[]; updatedAt?: string }
+export interface SideSecrets { paths: number; files: string[]; updatedAt?: string }
+
+export interface SecretValuesInfo { left: SideSecrets; right: SideSecrets }
 
 export interface MissingSecretPath { side: 'LEFT' | 'RIGHT'; variable: string; path: string; file: string; line: number }
 
@@ -428,9 +430,8 @@ export interface EnvView {
     right: number
   }
   secrets: {
-    loadedPaths: number
-    files: string[]
-    updatedAt?: string
+    left: SideSecrets
+    right: SideSecrets
     referenced: number
     resolved: number
     missing: MissingSecretPath[]

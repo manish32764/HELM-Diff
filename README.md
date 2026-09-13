@@ -13,32 +13,30 @@ HELM-Compare/
 ## Compare two folders (home screen)
 
 1. Choose the **left** and **right** parent folders. Each contains one sub-folder per microservice with its Helm chart.
-2. Sub-folders with the same name are matched and every file is compared.
-3. The **tree view** shows both folders side by side (border in the middle, each side scrolls horizontally on its own):
-   `IDENTICAL`, `LOGICALLY SAME` (only ordering / spacing / quoting / comments differ), `DIFFERS`, `FILE EMPTY`,
-   `LEFT ONLY` / `RIGHT ONLY`, and `— does not exist —` on the missing side. Folders are **green** when every file is
-   identical, otherwise **yellow**.
-4. Click a file to open the **file-to-file view** (same window, *Back* returns to the tree). Both files are shown with
-   VS Code-style YAML / Helm colours. **Show logical differences** lists what really changed for Kubernetes; selecting a
-   difference highlights the exact lines on both sides (green = added, red = removed, amber = changed).
-   Keyboard: `n` / `p` next / previous difference, `Backspace` back, `[` collapse / expand the sidebar.
-5. Export any comparison to Excel, HTML or CSV (folders, files and every logical difference with line numbers).
-6. **ENV** (on a file or folder) opens *Environment variables & secrets*: one row per variable with how it is injected
-   and the value the container receives on each side. `envVars` (plain text), `envSecrets`
-   (`name` ← `secretName`/`secretKey`) and `externalsecrets.akeyless.secretItems` (key → AKeyless `path`) are linked,
-   so `JIRA_API_TOKEN ← envSecrets › Secret attlasian-mcp-server · key JIRA_API_TOKEN › secretItems /Platform/…` is
-   one row. Each row is **Missing in right / left**, **Different value**, **Can't verify** or **Same value**; plain ↔
-   AKeyless changes, similar names and variables defined twice (e.g. in `envVars` *and* as a secret item) are flagged.
-   Because PROD reads AKeyless while NON-PROD is plain text, upload a **values JSON** with the actual value of each
-   AKeyless path; the paths still missing can be copied as a JSON template:
+   Give each side a **label** (e.g. `NON-PROD`, `PROD`); without one the folder name is used. When an environment reads
+   secrets from AKeyless, also choose its **AKeyless values JSON** — one file per environment with the actual value of
+   each path:
 
    ```json
    { "/Platform/KPS/APM0007705/common/API_KEY": "value", "/Platform/KPS/APM0007705/dev/azure/assist-dev/CLIENT_ID": "…" }
    ```
 
    Nested folders (`{ "Platform": { "KPS": { … } } }`) and lists (`[{ "path": "…", "value": "…" }]`) also work. The values
-   are stored with the comparison (`data/folder-compares/{id}/secret-values.json`), are masked on screen and in exports
-   unless *Show secret values* is on, and are removed with *Clear* or when the comparison is deleted.
+   are stored with the comparison (`data/folder-compares/{id}/secret-values-left|right.json`) and deleted with it.
+2. The comparison lists the **first-level (microservice) folders** of both sides with their status. Double-click a folder
+   (or **OPEN ↗**) to open its complete Helm chart tree in a **new tab**; **ENV ↗** opens its environment variables.
+3. In the chart tab, click a file to open the **file-to-file view**. Each pane is titled `LABEL\relative\path`.
+   **Show logical differences** lists what really changed for Kubernetes; the panel can be collapsed / expanded,
+   maximised, or opened in a **separate tab** (selecting a difference there highlights it in the file tab).
+   **Code only** shows just the two files, with previous / next difference buttons.
+   Keyboard: `n` / `p` next / previous difference, `Esc` leave maximised panel or code only, `Backspace` back.
+4. **Env variables & secrets** (new tab): one row per variable. `envVars` (plain text), `envSecrets`
+   (`name` ← `secretName`/`secretKey`) and `externalsecrets.akeyless.secretItems` (key → AKeyless `path`) are linked, and
+   AKeyless paths are resolved with the JSON of that side. Tick **Injected via** and/or **Value** to choose the columns.
+   Each row is **Missing in …**, **Different value**, **Can't verify** or **Same value**; plain ↔ AKeyless changes,
+   similar names and variables defined twice are noted. Secret values stay masked (also in exports) unless
+   *Reveal secret values* is ticked; unknown paths can be copied as a JSON template.
+5. Export any comparison to Excel, HTML or CSV.
 
 Hidden folders (such as `.git`), `node_modules`, `target` and files over 10 MB are skipped.
 

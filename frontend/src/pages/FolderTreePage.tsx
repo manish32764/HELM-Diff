@@ -6,7 +6,8 @@ import { ExportMenu } from '../components/ExportMenu'
 import { FileIcon, FolderIcon } from '../components/FolderIcons'
 import { Button, SearchInput, Segmented, Spinner, useToast } from '../components/ui'
 import { formatDate } from '../lib/labels'
-import { navigate } from '../lib/router'
+import { navigate, openTab } from '../lib/router'
+import { closeTab, sidePath, sideTitle } from '../lib/sides'
 import { useAsync } from '../lib/useAsync'
 
 type Filter = 'ALL' | 'DIFF' | 'SAME'
@@ -38,26 +39,46 @@ function save(key: string, value: unknown) {
   }
 }
 
-export function FolderTreePage({ id }: { id: string }) {
+/**
+ * Without `root`: the uploaded parent folders side by side, first-level (microservice) folders only.
+ * With `root`: the complete Helm chart of that microservice folder (opened in its own tab).
+ */
+export function FolderTreePage({ id, root }: { id: string; root?: string }) {
   const data = useAsync(() => api.folderCompare(id), [id])
   if (data.loading) return <Spinner />
   if (data.error) return <div className="banner banner-error">{data.error}</div>
-  return <FolderTree compare={data.data!} />
+  const compare = data.data!
+  if (root === undefined) return <FolderTree compare={compare} />
+  const scope = findNode(compare.root, root)
+  if (!scope || !scope.dir) return <div className="banner banner-error">Folder not found: {root}</div>
+  return <FolderTree compare={compare} scope={scope} />
 }
 
-function FolderTree({ compare }: { compare: FolderCompare }) {
+function FolderTree({ compare, scope }: { compare: FolderCompare; scope?: FolderNode }) {
   const { id } = compare
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(load<string[]>(storageKey(id, 'expanded'), [])))
-  const [filter, setFilter] = useState<Filter>(() => load<Filter>(storageKey(id, 'filter'), 'ALL'))
+  const chart = scope !== undefined
+  const suffix = scope ? `:${scope.path}` : ''
+  const expandedKey = storageKey(id, `expanded${suffix}`)
+  const filterKey = storageKey(id, `filter${suffix}`)
+  const lastKey = storageKey(id, `last${suffix}`)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(load<string[] | null>(expandedKey, null) ?? (scope ? allDirs(scope) : [])))
+  const [filter, setFilter] = useState<Filter>(() => load<Filter>(filterKey, 'ALL'))
   const [query, setQuery] = useState('')
   const [hover, setHover] = useState<number | null>(null)
-  const [lastOpened] = useState(() => load<string>(storageKey(id, 'last'), ''))
+  const [lastOpened, setLastOpened] = useState(() => load<string>(lastKey, ''))
   const toast = useToast()
+  const leftTitle = sideTitle(compare.leftName, compare.leftLabel)
+  const rightTitle = sideTitle(compare.rightName, compare.rightLabel)
 
-  useEffect(() => save(storageKey(id, 'expanded'), [...expanded]), [id, expanded])
-  useEffect(() => save(storageKey(id, 'filter'), filter), [id, filter])
+  useEffect(() => save(expandedKey, [...expanded]), [expandedKey, expanded])
+  useEffect(() => save(filterKey, filter), [filterKey, filter])
+  useEffect(() => {
+    document.title = scope ? `${scope.name} · Helm chart` : 'Helm Compare'
+  }, [scope])
 
-  const rows = useMemo(() => flatten(compare.root, expanded, filter, query.trim().toLowerCase()), [compare.root, expanded, filter, query])
+  const q = query.trim().toLowerCase()
+  const rows = useMemo(() => (scope ? flatten(scope, expanded, filter, q) : topLevel(compare.root, filter, q)),
+    [scope, compare.root, expanded, filter, q])
 
   const gutterRef = useRef<HTMLDivElement>(null)
   const leftRef = useRef<HTMLDivElement>(null)
@@ -94,17 +115,24 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
     })
   }, [])
 
-  const open = useCallback((path: string) => {
-    save(storageKey(id, 'last'), path)
+  const select = useCallback((path: string) => {
+    save(lastKey, path)
+    setLastOpened(path)
+  }, [lastKey])
+
+  const openFile = useCallback((path: string) => {
+    save(lastKey, path)
     navigate(`/folders/${id}/file?path=${encodeURIComponent(path)}`)
-  }, [id])
+  }, [id, lastKey])
+
+  const openChart = useCallback((path: string) => {
+    select(path)
+    openTab(`/folders/${id}/chart?root=${encodeURIComponent(path)}`)
+  }, [id, select])
 
   const openEnv = useCallback((path: string) => {
-    navigate(`/folders/${id}/env?path=${encodeURIComponent(path)}&scope=FOLDER`)
+    openTab(`/folders/${id}/env?path=${encodeURIComponent(path)}&scope=FOLDER`)
   }, [id])
-
-  const expandAll = () => setExpanded(new Set(allDirs(compare.root)))
-  const collapseAll = () => setExpanded(new Set())
 
   const remove = async () => {
     if (!window.confirm('Delete this comparison?')) return
@@ -118,31 +146,57 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
   return (
     <div className="page-fill">
       <div className="fill-header">
-        <div style={{ minWidth: 0 }}>
-          <div className="eyebrow">Folder comparison · {formatDate(compare.createdAt)}</div>
-          <h1 className="page-title fill-title">
-            <span className="mono">{compare.leftName}</span> <span className="faint">↔</span> <span className="mono">{compare.rightName}</span>
-          </h1>
-        </div>
+        {scope ? (
+          <div style={{ minWidth: 0 }}>
+            <div className="eyebrow">Helm chart · {scope.name}</div>
+            <h1 className="page-title fill-title">
+              <span className="mono">{sidePath(compare.leftName, compare.leftLabel, scope.path)}</span> <span className="faint">↔</span>{' '}
+              <span className="mono">{sidePath(compare.rightName, compare.rightLabel, scope.path)}</span>
+            </h1>
+          </div>
+        ) : (
+          <div style={{ minWidth: 0 }}>
+            <div className="eyebrow">Folder comparison · {formatDate(compare.createdAt)}</div>
+            <h1 className="page-title fill-title">
+              <span className="mono">{leftTitle}</span> <span className="faint">↔</span> <span className="mono">{rightTitle}</span>
+            </h1>
+          </div>
+        )}
         <div className="actions">
-          <Button onClick={() => navigate('/')}>New comparison</Button>
-          <ExportMenu url={(f) => api.folderExportUrl(id, f)} formats={['xlsx', 'html', 'csv']} />
-          <Button variant="danger" onClick={remove}>Delete</Button>
+          {scope ? (
+            <>
+              <Button onClick={() => openEnv(scope.path)} title="Opens in a new tab">⊞ Env variables &amp; secrets</Button>
+              <Button onClick={() => closeTab(`/folders/${id}`)}>Close tab</Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={() => navigate('/')}>New comparison</Button>
+              <ExportMenu url={(f) => api.folderExportUrl(id, f)} formats={['xlsx', 'html', 'csv']} />
+              <Button variant="danger" onClick={remove}>Delete</Button>
+            </>
+          )}
         </div>
       </div>
 
       <div className="summary-strip">
-        <span className="strip-item"><span className="dot dot-gray" /><b>{s.leftFolders}</b> {compare.leftName} folders</span>
-        <span className="strip-item"><span className="dot dot-gray" /><b>{s.rightFolders}</b> {compare.rightName} folders</span>
-        <span className="strip-item"><span className="dot dot-green" /><b>{s.matchedFolders}</b> matches</span>
-        <span className="strip-item"><span className="dot dot-green" /><b>{s.identicalFolders}</b> identical</span>
-        <span className="strip-item"><span className="dot dot-red" /><b>{s.differentFolders}</b> with differences</span>
-        <span className="strip-item"><span className="dot dot-orange" /><b>{s.leftOnlyFolders}</b> left only</span>
-        <span className="strip-item"><span className="dot dot-orange" /><b>{s.rightOnlyFolders}</b> right only</span>
-        <span className="strip-sep" />
-        <span className="strip-item muted">
-          {s.files} files: {s.identicalFiles} identical · {s.logicallySameFiles} logically same · {s.differentFiles} differ · {s.leftOnlyFiles + s.rightOnlyFiles} one side only
-        </span>
+        {scope ? (
+          <span className="strip-item muted">
+            {fileTotal(scope)} file{fileTotal(scope) === 1 ? '' : 's'}: {scope.identical} identical · {scope.logicallySame} logically same · {scope.differs} differ · {scope.leftOnly + scope.rightOnly} one side only
+          </span>
+        ) : (
+          <>
+            <span className="strip-item"><span className="dot dot-gray" /><b>{s.leftFolders}</b> {leftTitle} folders</span>
+            <span className="strip-item"><span className="dot dot-gray" /><b>{s.rightFolders}</b> {rightTitle} folders</span>
+            <span className="strip-item"><span className="dot dot-green" /><b>{s.identicalFolders}</b> identical</span>
+            <span className="strip-item"><span className="dot dot-red" /><b>{s.differentFolders}</b> with differences</span>
+            <span className="strip-item"><span className="dot dot-orange" /><b>{s.leftOnlyFolders}</b> only in {leftTitle}</span>
+            <span className="strip-item"><span className="dot dot-orange" /><b>{s.rightOnlyFolders}</b> only in {rightTitle}</span>
+            <span className="strip-sep" />
+            <span className="strip-item muted">
+              {s.files} files: {s.identicalFiles} identical · {s.logicallySameFiles} logically same · {s.differentFiles} differ · {s.leftOnlyFiles + s.rightOnlyFiles} one side only
+            </span>
+          </>
+        )}
       </div>
 
       <div className="fill-toolbar">
@@ -151,10 +205,16 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
           { value: 'DIFF', label: 'Differences only' },
           { value: 'SAME', label: 'Identical only' },
         ]} />
-        <Button size="sm" onClick={expandAll}>Expand all</Button>
-        <Button size="sm" onClick={collapseAll}>Collapse all</Button>
+        {scope ? (
+          <>
+            <Button size="sm" onClick={() => setExpanded(new Set(allDirs(scope)))}>Expand all</Button>
+            <Button size="sm" onClick={() => setExpanded(new Set())}>Collapse all</Button>
+          </>
+        ) : (
+          <span className="small muted">Double-click a folder to open its Helm chart in a new tab</span>
+        )}
         <div className="spacer" />
-        <SearchInput value={query} onChange={setQuery} placeholder="Find a folder or file" />
+        <SearchInput value={query} onChange={setQuery} placeholder={scope ? 'Find a file' : 'Find a microservice folder'} />
       </div>
 
       <div className="tree-grid">
@@ -162,11 +222,11 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
           <div className="th th-num">#</div>
           <div className="th th-dot" />
           <div className="th th-side" title={compare.leftName}>
-            {compare.leftName}{compare.leftLabel && <span className="th-label">({compare.leftLabel})</span>}
+            {leftTitle}{compare.leftLabel && <span className="th-label">({compare.leftName})</span>}
           </div>
           <div className="split-divider" />
           <div className="th th-side" title={compare.rightName}>
-            {compare.rightName}{compare.rightLabel && <span className="th-label">({compare.rightLabel})</span>}
+            {rightTitle}{compare.rightLabel && <span className="th-label">({compare.rightName})</span>}
           </div>
         </div>
 
@@ -192,10 +252,11 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
           {(['left', 'right'] as Side[]).map((side, k) => {
             const ref = k === 0 ? leftRef : rightRef
             return (
-              <TreePane key={side} side={side} rows={rows} expanded={expanded} hover={hover} lastOpened={lastOpened}
+              <TreePane key={side} side={side} rows={rows} chart={chart} expanded={expanded} hover={hover} lastOpened={lastOpened}
                 paneRef={ref} divider={k === 1}
                 onActivate={() => { active.current = ref.current }}
-                onScroll={(el) => onPaneScroll(el)} onHover={setHover} onToggle={toggle} onOpen={open} onEnv={openEnv} />
+                onScroll={(el) => onPaneScroll(el)} onHover={setHover} onToggle={toggle} onSelect={select}
+                onOpen={openFile} onOpenChart={openChart} onEnv={openEnv} />
             )
           })}
           {rows.length === 0 && <div className="tree-empty">Nothing matches the current filter.</div>}
@@ -209,15 +270,16 @@ function FolderTree({ compare }: { compare: FolderCompare }) {
         <span><span className="dot dot-orange" />One side only</span>
         <span><FolderIcon tone="green" /> all files identical</span>
         <span><FolderIcon tone="yellow" /> something differs</span>
-        <span className="tbadge tb-blue">ENV</span><span>compare env variables &amp; secrets of a microservice</span>
       </div>
     </div>
   )
 }
 
-function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, onActivate, onScroll, onHover, onToggle, onOpen, onEnv }: {
+function TreePane({ side, rows, chart, expanded, hover, lastOpened, paneRef, divider, onActivate, onScroll, onHover, onToggle, onSelect,
+  onOpen, onOpenChart, onEnv }: {
   side: Side
   rows: Row[]
+  chart: boolean
   expanded: Set<string>
   hover: number | null
   lastOpened: string
@@ -227,7 +289,9 @@ function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, o
   onScroll: (el: HTMLDivElement) => void
   onHover: (i: number) => void
   onToggle: (path: string) => void
+  onSelect: (path: string) => void
   onOpen: (path: string) => void
+  onOpenChart: (path: string) => void
   onEnv: (path: string) => void
 }) {
   return (
@@ -242,25 +306,31 @@ function TreePane({ side, rows, expanded, hover, lastOpened, paneRef, divider, o
             const isOpen = expanded.has(n.path)
             const cls = `tree-row ${hover === i ? 'hover' : ''} ${n.path === lastOpened ? 'last' : ''}`
             const pad = 14 + r.depth * 22
+            const click = () => (n.dir ? (chart ? onToggle(n.path) : onSelect(n.path)) : onOpen(n.path))
+            const doubleClick = () => { if (n.dir && !chart) onOpenChart(n.path) }
             if (state === 'MISSING') {
               return (
                 <div key={n.path} className={`${cls} missing`} style={{ paddingLeft: pad }} onMouseEnter={() => onHover(i)}
-                  onClick={() => (n.dir ? onToggle(n.path) : onOpen(n.path))}>
+                  onClick={click} onDoubleClick={doubleClick}>
                   <span className="tree-missing">— does not exist —</span>
                 </div>
               )
             }
             return (
-              <div key={n.path} className={cls} style={{ paddingLeft: pad }} title={n.reason} onMouseEnter={() => onHover(i)}
-                onClick={() => (n.dir ? onToggle(n.path) : onOpen(n.path))}>
-                {n.dir ? <span className="tree-toggle">{isOpen ? '−' : '+'}</span> : <span className="tree-toggle-space" />}
+              <div key={n.path} className={cls} style={{ paddingLeft: pad }} title={!chart && n.dir ? 'Double-click to open the Helm chart in a new tab' : n.reason}
+                onMouseEnter={() => onHover(i)} onClick={click} onDoubleClick={doubleClick}>
+                {n.dir && chart ? <span className="tree-toggle">{isOpen ? '−' : '+'}</span> : <span className="tree-toggle-space" />}
                 {n.dir ? <FolderIcon tone={n.status === 'IDENTICAL' ? 'green' : 'yellow'} /> : <FileIcon />}
                 <span className="tree-name">{n.name}</span>
                 <TreeBadge node={n} side={side} />
                 {n.dir && <span className="tree-counts">{dirCounts(n)}</span>}
-                {n.dir && r.depth === 0 && side === 'left' && (
-                  <button className="tree-env" title="Compare environment variables & secrets of this microservice"
-                    onClick={(e) => { e.stopPropagation(); onEnv(n.path) }}>ENV</button>
+                {n.dir && !chart && side === 'left' && (
+                  <span className="tree-actions">
+                    <button className="tree-env" title="Open the Helm chart of this folder in a new tab"
+                      onClick={(e) => { e.stopPropagation(); onOpenChart(n.path) }}>OPEN ↗</button>
+                    <button className="tree-env" title="Compare environment variables & secrets (new tab)"
+                      onClick={(e) => { e.stopPropagation(); onEnv(n.path) }}>ENV ↗</button>
+                  </span>
                 )}
               </div>
             )
@@ -283,8 +353,12 @@ function TreeBadge({ node, side }: { node: FolderNode; side: Side }) {
   }
 }
 
+function fileTotal(n: FolderNode): number {
+  return n.identical + n.logicallySame + n.differs + n.leftOnly + n.rightOnly
+}
+
 function dirCounts(n: FolderNode): string {
-  const total = n.identical + n.logicallySame + n.differs + n.leftOnly + n.rightOnly
+  const total = fileTotal(n)
   const parts = [`${total} file${total === 1 ? '' : 's'}`]
   if (n.differs) parts.push(`${n.differs} differ`)
   if (n.leftOnly + n.rightOnly) parts.push(`${n.leftOnly + n.rightOnly} one side`)
@@ -312,6 +386,14 @@ function matchesQuery(n: FolderNode, q: string): boolean {
   return !!n.children?.some((c) => matchesQuery(c, q))
 }
 
+/** First-level entries of the uploaded parent folders. */
+function topLevel(root: FolderNode, filter: Filter, q: string): Row[] {
+  let number = 0
+  return (root.children ?? [])
+    .filter((n) => matchesFilter(n, filter) && matchesQuery(n, q))
+    .map((n) => ({ node: n, depth: 0, number: n.dir ? undefined : ++number }))
+}
+
 function flatten(root: FolderNode, expanded: Set<string>, filter: Filter, q: string): Row[] {
   const rows: Row[] = []
   let number = 0
@@ -324,6 +406,14 @@ function flatten(root: FolderNode, expanded: Set<string>, filter: Filter, q: str
   }
   walk(root.children, 0)
   return rows
+}
+
+function findNode(root: FolderNode, path: string): FolderNode | undefined {
+  if (root.path === path) return root
+  for (const child of root.children ?? []) {
+    if (path === child.path || path.startsWith(`${child.path}/`)) return findNode(child, path)
+  }
+  return undefined
 }
 
 function allDirs(n: FolderNode): string[] {

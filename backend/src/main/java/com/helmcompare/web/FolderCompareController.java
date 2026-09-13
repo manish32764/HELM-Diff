@@ -36,8 +36,10 @@ public class FolderCompareController {
     public FolderCompare.Info create(@RequestParam(value = "left", required = false) List<MultipartFile> left,
                                      @RequestParam(value = "right", required = false) List<MultipartFile> right,
                                      @RequestParam(required = false) String leftLabel,
-                                     @RequestParam(required = false) String rightLabel) {
-        return service.create(left, right, leftLabel, rightLabel);
+                                     @RequestParam(required = false) String rightLabel,
+                                     @RequestParam(value = "leftSecrets", required = false) List<MultipartFile> leftSecrets,
+                                     @RequestParam(value = "rightSecrets", required = false) List<MultipartFile> rightSecrets) {
+        return service.create(left, right, leftLabel, rightLabel, leftSecrets, rightSecrets);
     }
 
     @GetMapping
@@ -78,13 +80,14 @@ public class FolderCompareController {
     @PostMapping(value = "/{id}/secret-values", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FolderCompareService.SecretValuesInfo uploadSecretValues(@PathVariable String id,
                                                                     @RequestParam("file") List<MultipartFile> file,
+                                                                    @RequestParam(defaultValue = "both") String side,
                                                                     @RequestParam(defaultValue = "false") boolean replace) {
-        return service.uploadSecretValues(id, file, replace);
+        return service.uploadSecretValues(id, side, file, replace);
     }
 
     @DeleteMapping("/{id}/secret-values")
-    public void clearSecretValues(@PathVariable String id) {
-        service.clearSecretValues(id);
+    public void clearSecretValues(@PathVariable String id, @RequestParam(defaultValue = "both") String side) {
+        service.clearSecretValues(id, side);
     }
 
     @DeleteMapping("/{id}")

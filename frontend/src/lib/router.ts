@@ -26,3 +26,8 @@ export function navigate(to: string) {
   window.location.hash = to
   window.scrollTo({ top: 0 })
 }
+
+/** Opens an in-app route in a new browser tab. */
+export function openTab(to: string) {
+  window.open(`${window.location.pathname}${window.location.search}#${to}`, '_blank')
+}

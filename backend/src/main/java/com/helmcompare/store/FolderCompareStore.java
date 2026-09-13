@@ -18,11 +18,12 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-/** Stores folder comparisons under data/folder-compares/{id}/ (compare.json, info.json, secret-values.json, left/, right/). */
+/**
+ * Stores folder comparisons under data/folder-compares/{id}/
+ * (compare.json, info.json, secret-values-left.json, secret-values-right.json, left/, right/).
+ */
 @Component
 public class FolderCompareStore {
-
-    private static final String SECRET_VALUES = "secret-values.json";
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -96,8 +97,9 @@ public class FolderCompareStore {
         }
     }
 
-    public Optional<SecretValues> secretValues(String id) {
-        Path file = root.resolve(id).resolve(SECRET_VALUES);
+    /** @param side "left" or "right" */
+    public Optional<SecretValues> secretValues(String id, String side) {
+        Path file = root.resolve(id).resolve(secretValuesFile(side));
         if (!infos.containsKey(id) || !Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.of(mapper.readValue(file.toFile(), SecretValues.class));
@@ -106,20 +108,25 @@ public class FolderCompareStore {
         }
     }
 
-    public void saveSecretValues(String id, SecretValues values) {
+    public void saveSecretValues(String id, String side, SecretValues values) {
         try {
-            mapper.writeValue(root.resolve(id).resolve(SECRET_VALUES).toFile(), values);
+            mapper.writeValue(root.resolve(id).resolve(secretValuesFile(side)).toFile(), values);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    public void deleteSecretValues(String id) {
+    public void deleteSecretValues(String id, String side) {
         try {
-            Files.deleteIfExists(root.resolve(id).resolve(SECRET_VALUES));
+            Files.deleteIfExists(root.resolve(id).resolve(secretValuesFile(side)));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static String secretValuesFile(String side) {
+        if (!"left".equals(side) && !"right".equals(side)) throw new IllegalArgumentException("Unknown side: " + side);
+        return "secret-values-" + side + ".json";
     }
 
     public void delete(String id) {

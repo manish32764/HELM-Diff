@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -56,10 +57,14 @@ public class FolderCompareService {
     private record Side(String rootName, Map<String, byte[]> files) {
     }
 
-    public FolderCompare.Info create(List<MultipartFile> left, List<MultipartFile> right, String leftLabel, String rightLabel) {
+    /** @param leftSecrets optional JSON with the AKeyless values of the left environment (same for right) */
+    public FolderCompare.Info create(List<MultipartFile> left, List<MultipartFile> right, String leftLabel, String rightLabel,
+                                     List<MultipartFile> leftSecrets, List<MultipartFile> rightSecrets) {
         if (left == null || left.isEmpty() || right == null || right.isEmpty()) {
             throw new IllegalArgumentException("Choose both a left and a right folder.");
         }
+        SecretValues leftValues = parseSecretValues(leftSecrets);
+        SecretValues rightValues = parseSecretValues(rightSecrets);
         Side l = side(left, "Left folder");
         Side r = side(right, "Right folder");
         if (l.files().isEmpty() || r.files().isEmpty()) {
@@ -76,6 +81,8 @@ public class FolderCompareService {
         c.root = buildTree(l.files(), r.files());
         summarize(c);
         store.save(c, l.files(), r.files());
+        if (leftValues != null) store.saveSecretValues(c.id, "left", leftValues);
+        if (rightValues != null) store.saveSecretValues(c.id, "right", rightValues);
         return FolderCompare.Info.of(c);
     }
 
@@ -130,30 +137,71 @@ public class FolderCompareService {
     public record MissingPath(String side, String variable, String path, String file, int line) {
     }
 
-    /**
-     * @param loadedPaths paths in the uploaded JSON
-     * @param referenced  AKeyless references of the compared variables (both sides)
-     * @param resolved    references whose value was found in the JSON
-     */
-    public record SecretsSummary(int loadedPaths, List<String> files, Instant updatedAt, int referenced, int resolved,
-                                 List<MissingPath> missing) {
+    /** AKeyless values uploaded for one environment (side). */
+    public record SideSecrets(int paths, List<String> files, Instant updatedAt) {
+        static SideSecrets of(SecretValues v) {
+            return v == null ? new SideSecrets(0, List.of(), null) : new SideSecrets(v.values.size(), v.files, v.updatedAt);
+        }
     }
 
-    public record SecretValuesInfo(int paths, List<String> files, Instant updatedAt) {
+    /**
+     * @param referenced AKeyless references of the compared variables (both sides)
+     * @param resolved   references whose value was found in the JSON of their side
+     */
+    public record SecretsSummary(SideSecrets left, SideSecrets right, int referenced, int resolved, List<MissingPath> missing) {
+    }
+
+    public record SecretValuesInfo(SideSecrets left, SideSecrets right) {
     }
 
     public SecretValuesInfo secretValuesInfo(String id) {
         get(id);
-        return store.secretValues(id).map(v -> new SecretValuesInfo(v.values.size(), v.files, v.updatedAt))
-                .orElse(new SecretValuesInfo(0, List.of(), null));
+        return new SecretValuesInfo(SideSecrets.of(store.secretValues(id, "left").orElse(null)),
+                SideSecrets.of(store.secretValues(id, "right").orElse(null)));
     }
 
-    /** Merges uploaded JSON files (AKeyless path → value) into the values of the comparison, or replaces them. */
-    public SecretValuesInfo uploadSecretValues(String id, List<MultipartFile> files, boolean replace) {
+    /**
+     * Stores JSON files (AKeyless path → value) for one environment; several files are merged unless {@code replace}.
+     *
+     * @param side left, right or both
+     */
+    public SecretValuesInfo uploadSecretValues(String id, String side, List<MultipartFile> files, boolean replace) {
         get(id);
-        if (files == null || files.isEmpty()) throw new IllegalArgumentException("Choose a JSON file with AKeyless values.");
-        SecretValues values = replace ? new SecretValues() : store.secretValues(id).orElseGet(SecretValues::new);
+        SecretValues parsed = parseSecretValues(files);
+        if (parsed == null) throw new IllegalArgumentException("Choose a JSON file with AKeyless values.");
+        for (String s : sides(side)) {
+            SecretValues values = replace ? new SecretValues() : store.secretValues(id, s).orElseGet(SecretValues::new);
+            values.values.putAll(parsed.values);
+            for (String f : parsed.files) {
+                values.files.remove(f);
+                values.files.add(f);
+            }
+            values.updatedAt = parsed.updatedAt;
+            store.saveSecretValues(id, s, values);
+        }
+        return secretValuesInfo(id);
+    }
+
+    public void clearSecretValues(String id, String side) {
+        get(id);
+        for (String s : sides(side)) store.deleteSecretValues(id, s);
+    }
+
+    private static List<String> sides(String side) {
+        return switch (side == null ? "both" : side.toLowerCase(Locale.ROOT)) {
+            case "left" -> List.of("left");
+            case "right" -> List.of("right");
+            case "both" -> List.of("left", "right");
+            default -> throw new IllegalArgumentException("side must be left, right or both");
+        };
+    }
+
+    /** @return the merged values, or null when no non-empty file was uploaded */
+    private SecretValues parseSecretValues(List<MultipartFile> files) {
+        if (files == null) return null;
+        SecretValues values = new SecretValues();
         for (MultipartFile f : files) {
+            if (f == null || f.isEmpty()) continue;
             String name = f.getOriginalFilename() == null ? "values.json" : f.getOriginalFilename();
             Map<String, String> parsed;
             try {
@@ -168,14 +216,9 @@ public class FolderCompareService {
             values.files.remove(name);
             values.files.add(name);
         }
+        if (values.files.isEmpty()) return null;
         values.updatedAt = Instant.now();
-        store.saveSecretValues(id, values);
-        return new SecretValuesInfo(values.values.size(), values.files, values.updatedAt);
-    }
-
-    public void clearSecretValues(String id) {
-        get(id);
-        store.deleteSecretValues(id);
+        return values;
     }
 
     /**
@@ -200,10 +243,13 @@ public class FolderCompareService {
             left.addAll(EnvVarExtractor.extract(f, store.file(id, "left", f).orElse(null)));
             right.addAll(EnvVarExtractor.extract(f, store.file(id, "right", f).orElse(null)));
         }
-        SecretValues uploaded = store.secretValues(id).orElse(null);
-        AkeylessValues values = new AkeylessValues(uploaded == null ? null : uploaded.values);
-        List<EnvVarExtractor.EnvVar> l = values.apply(EnvVarExtractor.resolve(left));
-        List<EnvVarExtractor.EnvVar> r = values.apply(EnvVarExtractor.resolve(right));
+        // each environment has its own AKeyless values
+        SecretValues leftUploaded = store.secretValues(id, "left").orElse(null);
+        SecretValues rightUploaded = store.secretValues(id, "right").orElse(null);
+        List<EnvVarExtractor.EnvVar> l = new AkeylessValues(leftUploaded == null ? null : leftUploaded.values)
+                .apply(EnvVarExtractor.resolve(left));
+        List<EnvVarExtractor.EnvVar> r = new AkeylessValues(rightUploaded == null ? null : rightUploaded.values)
+                .apply(EnvVarExtractor.resolve(right));
         EnvVarComparer.Result result = EnvVarComparer.compare(l, r);
 
         int referenced = 0;
@@ -217,8 +263,8 @@ public class FolderCompareService {
                 else missing.add(new MissingPath(side == l ? "LEFT" : "RIGHT", v.name(), v.akeylessPath(), v.file(), v.line()));
             }
         }
-        SecretsSummary secrets = new SecretsSummary(uploaded == null ? 0 : uploaded.values.size(),
-                uploaded == null ? List.of() : uploaded.files, uploaded == null ? null : uploaded.updatedAt, referenced, resolved, missing);
+        SecretsSummary secrets = new SecretsSummary(SideSecrets.of(leftUploaded), SideSecrets.of(rightUploaded),
+                referenced, resolved, missing);
         return new EnvView(path, folderScope ? "FOLDER" : "FILE", scopePath, !node.dir, files,
                 c.leftName, c.rightName, c.leftLabel, c.rightLabel, result.rows(), result.summary(), secrets);
     }

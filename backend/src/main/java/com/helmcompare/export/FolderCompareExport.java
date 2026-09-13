@@ -114,9 +114,9 @@ public class FolderCompareExport {
         meta.add(new String[]{"Source changed (e.g. plain → AKeyless)", String.valueOf(s.sourceChanged())});
         meta.add(new String[]{"Matched by similar name", String.valueOf(s.similarNames())});
         meta.add(new String[]{"Defined more than once", String.valueOf(s.duplicates())});
-        meta.add(new String[]{"AKeyless values", view.secrets().loadedPaths() == 0 ? "not uploaded"
-                : view.secrets().loadedPaths() + " path(s) from " + String.join(", ", view.secrets().files())
-                + " · " + view.secrets().resolved() + " of " + view.secrets().referenced() + " reference(s) resolved"});
+        meta.add(new String[]{"AKeyless values (left)", secretsText(view.secrets().left())});
+        meta.add(new String[]{"AKeyless values (right)", secretsText(view.secrets().right())});
+        meta.add(new String[]{"AKeyless references resolved", view.secrets().resolved() + " of " + view.secrets().referenced()});
         meta.add(new String[]{"Secret values", showSecrets ? "shown" : "masked"});
 
         List<List<String>> rows = new ArrayList<>();
@@ -158,6 +158,10 @@ public class FolderCompareExport {
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", exports.xlsx(report));
             default -> throw new IllegalArgumentException("Unsupported export format: " + format);
         };
+    }
+
+    private static String secretsText(FolderCompareService.SideSecrets s) {
+        return s.paths() == 0 ? "not uploaded" : s.paths() + " path(s) from " + String.join(", ", s.files());
     }
 
     private static void side(List<String> row, EnvVarExtractor.EnvVar v, boolean showSecrets) {

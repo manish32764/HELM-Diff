@@ -95,10 +95,11 @@ export const api = {
     request<EnvView>(`/api/folder-compares/${id}/env?path=${encodeURIComponent(path)}&scope=${scope}`),
   folderEnvExportUrl: (id: string, path: string, scope: string, format: string, showSecrets = false) =>
     `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}&showSecrets=${showSecrets}`,
-  uploadSecretValues: (id: string, files: File[], replace: boolean) => {
+  uploadSecretValues: (id: string, side: 'left' | 'right' | 'both', files: File[], replace: boolean) => {
     const form = new FormData()
     files.forEach((f) => form.append('file', f))
-    return request<SecretValuesInfo>(`/api/folder-compares/${id}/secret-values?replace=${replace}`, { method: 'POST', body: form })
+    return request<SecretValuesInfo>(`/api/folder-compares/${id}/secret-values?side=${side}&replace=${replace}`, { method: 'POST', body: form })
   },
-  clearSecretValues: (id: string) => request<void>(`/api/folder-compares/${id}/secret-values`, { method: 'DELETE' }),
+  clearSecretValues: (id: string, side: 'left' | 'right' | 'both') =>
+    request<void>(`/api/folder-compares/${id}/secret-values?side=${side}`, { method: 'DELETE' }),
 }

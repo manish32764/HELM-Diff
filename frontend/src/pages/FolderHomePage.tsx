@@ -38,6 +38,8 @@ export function FolderHomePage() {
   const [right, setRight] = useState<PickedFolder | null>(null)
   const [leftLabel, setLeftLabel] = useState('')
   const [rightLabel, setRightLabel] = useState('')
+  const [leftSecrets, setLeftSecrets] = useState<File | null>(null)
+  const [rightSecrets, setRightSecrets] = useState<File | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
   const history = useAsync(() => api.folderCompares(), [])
   const toast = useToast()
@@ -60,6 +62,8 @@ export function FolderHomePage() {
     right.files.forEach(({ file, path }) => form.append('right', file, path))
     if (leftLabel) form.append('leftLabel', leftLabel)
     if (rightLabel) form.append('rightLabel', rightLabel)
+    if (leftSecrets) form.append('leftSecrets', leftSecrets, leftSecrets.name)
+    if (rightSecrets) form.append('rightSecrets', rightSecrets, rightSecrets.name)
     setProgress(0)
     try {
       const info = await uploadWithProgress<FolderCompareInfo>('/api/folder-compares', form, setProgress)
@@ -92,9 +96,11 @@ export function FolderHomePage() {
       </header>
 
       <div className="pick-grid">
-        <FolderPickCard side="Left" folder={left} onPick={setLeft} label={leftLabel} onLabel={setLeftLabel} disabled={busy} />
+        <FolderPickCard side="Left" folder={left} onPick={setLeft} label={leftLabel} onLabel={setLeftLabel}
+          secrets={leftSecrets} onSecrets={setLeftSecrets} disabled={busy} />
         <div className="pick-vs">↔</div>
-        <FolderPickCard side="Right" folder={right} onPick={setRight} label={rightLabel} onLabel={setRightLabel} disabled={busy} />
+        <FolderPickCard side="Right" folder={right} onPick={setRight} label={rightLabel} onLabel={setRightLabel}
+          secrets={rightSecrets} onSecrets={setRightSecrets} disabled={busy} />
       </div>
 
       {match && (
@@ -152,15 +158,28 @@ export function FolderHomePage() {
   )
 }
 
-function FolderPickCard({ side, folder, onPick, label, onLabel, disabled }: {
+function FolderPickCard({ side, folder, onPick, label, onLabel, secrets, onSecrets, disabled }: {
   side: 'Left' | 'Right'
   folder: PickedFolder | null
   onPick: (f: PickedFolder | null) => void
   label: string
   onLabel: (v: string) => void
+  secrets: File | null
+  onSecrets: (f: File | null) => void
   disabled: boolean
 }) {
   const input = useRef<HTMLInputElement>(null)
+  const jsonInput = useRef<HTMLInputElement>(null)
+
+  const pickJson = async (file?: File) => {
+    if (!file) return
+    try {
+      JSON.parse(await file.text())
+      onSecrets(file)
+    } catch {
+      toast(`${file.name} is not valid JSON`, 'error')
+    }
+  }
   const [drag, setDrag] = useState(false)
   const toast = useToast()
 
@@ -202,8 +221,26 @@ function FolderPickCard({ side, folder, onPick, label, onLabel, disabled }: {
             {folder.subfolders.slice(0, 60).map((s) => <span key={s} className="chip mono">{s}</span>)}
             {folder.subfolders.length > 60 && <span className="chip">+{folder.subfolders.length - 60} more</span>}
           </div>
-          <input className="input" placeholder="Label (optional), e.g. v3.0.4" value={label} disabled={disabled}
+          <input className="input" placeholder={`Label (optional), e.g. PROD — shown instead of ${folder.root}`} value={label} disabled={disabled}
             onChange={(e) => onLabel(e.target.value)} />
+          <div className="pick-secrets">
+            <input ref={jsonInput} type="file" accept=".json,application/json" hidden
+              onChange={(e) => { pickJson(e.target.files?.[0]); e.target.value = '' }} />
+            <div className="pick-secrets-row">
+              <span className="pick-secrets-label">AKeyless values JSON <span className="faint">(optional)</span></span>
+              {secrets ? (
+                <span className="chip mono">
+                  {secrets.name}
+                  <button className="chip-x" disabled={disabled} onClick={() => onSecrets(null)} aria-label="Remove JSON" title="Remove">×</button>
+                </span>
+              ) : (
+                <Button size="sm" disabled={disabled} onClick={() => jsonInput.current?.click()}>Choose JSON…</Button>
+              )}
+            </div>
+            <div className="pick-hint">
+              Only when this environment reads secrets from AKeyless — the value of each path: <code>{'{ "/Platform/…/API_KEY": "value" }'}</code>
+            </div>
+          </div>
           <div><Button size="sm" disabled={disabled} onClick={() => input.current?.click()}>Change folder</Button></div>
         </div>
       )}

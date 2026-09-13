@@ -4,6 +4,7 @@ import { ToastProvider } from './components/ui'
 import { useRoute } from './lib/router'
 import { AnalysisPage } from './pages/AnalysisPage'
 import { ChartsPage } from './pages/ChartsPage'
+import { DiffsPage } from './pages/DiffsPage'
 import { EnvVarsPage } from './pages/EnvVarsPage'
 import { FileComparePage } from './pages/FileComparePage'
 import { FolderHomePage } from './pages/FolderHomePage'
@@ -77,6 +78,12 @@ export default function App() {
           return <EnvVarsPage key={`${route.query.get('path')}|${route.query.get('scope')}`} id={route.segments[1]}
             path={route.query.get('path') ?? ''} scope={route.query.get('scope') ?? undefined} />
         }
+        if (route.segments[2] === 'chart') {
+          return <FolderTreePage key={`${route.segments[1]}|${route.query.get('root')}`} id={route.segments[1]} root={route.query.get('root') ?? ''} />
+        }
+        if (route.segments[2] === 'diffs') {
+          return <DiffsPage key={route.query.get('path') ?? ''} id={route.segments[1]} path={route.query.get('path') ?? ''} />
+        }
         return <FolderTreePage key={route.segments[1]} id={route.segments[1]} />
       case 'analyses': return <HomePage />
       case 'charts': return <ChartsPage />
@@ -95,13 +102,16 @@ export default function App() {
     if (to === '/history') return first === 'history' || first === 'analysis'
     return `/${first}` === to
   }
-  const mainClass = first !== 'folders' ? '' : route.segments[2] ? 'compact' : 'fill'
+  const view = first === 'folders' ? route.segments[2] : undefined
+  const mainClass = first !== 'folders' ? '' : !view || view === 'chart' ? 'fill' : 'compact'
+  /** Charts, files, env variables and differences are focused views (usually their own tab) without the sidebar. */
+  const standalone = !!view
 
   return (
     <ToastProvider>
       <SourceViewerProvider>
         <div className="app">
-          <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+          {!standalone && <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
             <button className="sidebar-toggle" onClick={() => setCollapsed((c) => !c)}
               title={collapsed ? 'Expand sidebar  [' : 'Collapse sidebar  ['} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? '›' : '‹'}
@@ -127,7 +137,7 @@ export default function App() {
               </div>
             ))}
             <div className="sidebar-foot">Press [ to collapse or expand this panel.</div>
-          </nav>
+          </nav>}
           <main className={`main ${mainClass}`}>{page}</main>
         </div>
       </SourceViewerProvider>
