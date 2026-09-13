@@ -18,7 +18,7 @@ HELM-Compare/
    each path:
 
    ```json
-   { "/Platform/KPS/APM0007705/common/API_KEY": "value", "/Platform/KPS/APM0007705/dev/azure/assist-dev/CLIENT_ID": "…" }
+   { "/Platform/team/app/common/API_KEY": "value", "/Platform/team/app/dev/CLIENT_ID": "…" }
    ```
 
    Nested folders (`{ "Platform": { "KPS": { … } } }`) and lists (`[{ "path": "…", "value": "…" }]`) also work. The values

@@ -1,4 +1,4 @@
-/* ── collapsible sidebar (Jira-style) ── */
+/* ── collapsible sidebar ── */
 .sidebar { transition: width .2s ease, padding .2s ease; z-index: 30; }
 .sidebar-toggle {
   position: absolute; top: 30px; right: -13px; width: 26px; height: 26px; border-radius: 50%;
@@ -151,6 +151,12 @@
 .code-line.sel.hl-removed { background: #ffcfcc; }
 .code-line.sel.hl-changed { background: #ffeaa0; }
 .code-line.sel .code-ln { box-shadow: inset 5px 0 var(--accent); color: var(--text); font-weight: 600; }
+/* The selected block briefly flashes so the eye finds it on both sides after Next / Previous. */
+.code-line.sel { animation: sel-flash .9s ease-out; }
+@keyframes sel-flash { 0%, 35% { box-shadow: inset 0 0 0 999px rgba(0, 113, 227, .16); } 100% { box-shadow: none; } }
+/* Missing on this side: a line under the place where the block would be. */
+.code-line.hl-anchor { cursor: pointer; background-image: repeating-linear-gradient(90deg, #cf222e 0 6px, transparent 6px 10px); background-size: 100% 2px; background-repeat: no-repeat; background-position: bottom; }
+.code-line.hl-anchor .code-ln { color: #cf222e; }
 /* The selected block briefly flashes so the eye finds it on both sides after Next / Previous. */
 .code-line.sel { animation: sel-flash .9s ease-out; }
 @keyframes sel-flash { 0%, 35% { box-shadow: inset 0 0 0 999px rgba(0, 113, 227, .16); } 100% { box-shadow: none; } }

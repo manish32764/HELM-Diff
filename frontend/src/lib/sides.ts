@@ -5,7 +5,7 @@ export function sideTitle(name: string, label?: string | null): string {
   return label?.trim() || name
 }
 
-/** "LABEL\poBackend\helm\values.yaml" — tells which side's file is shown. */
+/** "LABEL\my-service\helm\values.yaml" — tells which side's file is shown. */
 export function sidePath(name: string, label: string | null | undefined, path: string): string {
   return [sideTitle(name, label), ...path.split('/').filter(Boolean)].join('\\')
 }

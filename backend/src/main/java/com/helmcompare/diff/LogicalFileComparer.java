@@ -42,9 +42,11 @@ public final class LogicalFileComparer {
     }
 
     private static final List<String> IDENTITY_KEYS = List.of("name", "key", "containerPort", "topologyKey",
-            "mountPath", "secretKey", "port", "path", "ip", "host");
+            "mountPath", "secretKey", "port", "path", "ip", "host", "secretName");
     private static final Set<String> ORDERED_LISTS = Set.of("command", "args");
     private static final double MIN_ITEM_SIMILARITY = 0.3;
+    /** Share of the other settings that must be equal before items with a different name/host are the same item. */
+    private static final double MIN_RENAMED_SIMILARITY = 0.5;
     private static final long MAX_LCS_CELLS = 4_000_000L;
 
     private LogicalFileComparer() {
@@ -243,7 +245,27 @@ public final class LogicalFileComparer {
                 }
             }
         }
-        // 3. items without identity: most similar content first, then remaining ones by position
+        // 3. same identity key with another value ("host: a" ↔ "host: b") but the rest of the item matching:
+        //    the same item whose identifying value changed — reported as one value change, not removed + added
+        List<double[]> renamed = new ArrayList<>();
+        for (int i = 0; i < left.size(); i++) {
+            String key = identityKey(left.get(i));
+            if (pairOf[i] >= 0 || key == null) continue;
+            for (int j = 0; j < right.size(); j++) {
+                if (used[j] || !key.equals(identityKey(right.get(j)))) continue;
+                double s = similarityWithout(left.get(i), right.get(j), key);
+                if (s >= MIN_RENAMED_SIMILARITY) renamed.add(new double[]{s, i, j});
+            }
+        }
+        renamed.sort((a, b) -> Double.compare(b[0], a[0]));
+        for (double[] cand : renamed) {
+            int i = (int) cand[1];
+            int j = (int) cand[2];
+            if (pairOf[i] >= 0 || used[j]) continue;
+            pairOf[i] = j;
+            used[j] = true;
+        }
+        // 4. items without identity: most similar content first, then remaining ones by position
         List<double[]> candidates = new ArrayList<>();
         for (int i = 0; i < left.size(); i++) {
             if (pairOf[i] >= 0 || identity(left.get(i)) != null) continue;
@@ -293,13 +315,18 @@ public final class LogicalFileComparer {
         for (int j = 0; j < right.size(); j++) {
             if (used[j]) continue;
             YNode rn = right.get(j);
+            // after the previous matched item — and after left items removed right behind it, so a removed
+            // block and the block that replaces it are shown one after the other
+            int next = 0;
             int anchor = lKey;
             for (int k = j - 1; k >= 0; k--) {
                 if (leftOf[k] >= 0) {
                     anchor = left.get(leftOf[k]).endLine;
+                    next = leftOf[k] + 1;
                     break;
                 }
             }
+            while (next < left.size() && pairOf[next] < 0) anchor = left.get(next++).endLine;
             c.add("ADDED", display(path + "[" + itemLabel(rn, j) + "]"), "List item added", null, render(rn),
                     0, 0, rn.line, rn.endLine, anchor, rn.line);
         }
@@ -529,6 +556,30 @@ public final class LogicalFileComparer {
             if (v != null) return key + "=" + v;
         }
         return null;
+    }
+
+    private static String identityKey(YNode n) {
+        if (n == null || !n.isMap()) return null;
+        for (String key : IDENTITY_KEYS) {
+            if (n.str(key) != null) return key;
+        }
+        return null;
+    }
+
+    /**
+     * Share of settings other than the identifying key that are equal on both items (0 when there are none):
+     * an ingress host with the same paths is ~1, a volume with another secret is 0.
+     */
+    private static double similarityWithout(YNode a, YNode b, String identityKey) {
+        Set<String> keys = new HashSet<>(a.map.keySet());
+        keys.addAll(b.map.keySet());
+        keys.remove(identityKey);
+        if (keys.isEmpty()) return 0;
+        int equal = 0;
+        for (String k : keys) {
+            if (a.has(k) && b.has(k) && canonical(a.get(k)).equals(canonical(b.get(k)))) equal++;
+        }
+        return (double) equal / keys.size();
     }
 
     /** XPath-like list item selector: [name=config] or the 1-based position. */

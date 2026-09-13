@@ -101,7 +101,7 @@ public final class EnvVarExtractor {
 
     /**
      * Links env variables that read a Kubernetes Secret to the ExternalSecret / secret item / Secret that provides it,
-     * so "JIRA_API_TOKEN ← envSecrets attlasian-mcp-server/JIRA_API_TOKEN ← AKeyless /…/JIRA_API_TOKEN" becomes one row.
+     * so "API_TOKEN ← envSecrets shared-secrets/API_TOKEN ← AKeyless /…/API_TOKEN" becomes one row.
      */
     public static List<EnvVar> resolve(List<EnvVar> vars) {
         Map<String, EnvVar> named = new HashMap<>();

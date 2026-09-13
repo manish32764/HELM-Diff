@@ -96,7 +96,7 @@ class EnvVarComparerTest {
 
     @Test
     void envVarsEnvSecretsAndAkeylessSecretItems() throws Exception {
-        List<EnvVar> nonProd = extract("poBackend/helm/values.yaml", """
+        List<EnvVar> nonProd = extract("orders-service/helm/values.yaml", """
                 externalsecrets:
                   enabled: true
                   refreshInterval: 5m
@@ -104,68 +104,68 @@ class EnvVarComparerTest {
                     enabled: true
                     secretStoreName: akeyless-secret-store
                     secretItems:
-                      KEYCLOAK_SERVER_URL:
-                        path: "/Platform/dev/KEYCLOAK_SERVER_URL"
+                      AUTH_SERVER_URL:
+                        path: "/Platform/dev/AUTH_SERVER_URL"
                 envVars:
-                  JIRA_BASE_URL: https://jira.example.com
+                  TICKETS_BASE_URL: https://tickets.example.com
                   DB_NAME: psqldb-d
-                  KEYCLOAK_SERVER_URL: "https://kc"
-                  LANGFUSE_SECRET_KEY: abc
+                  AUTH_SERVER_URL: "https://kc"
+                  TRACING_SECRET_KEY: abc
                   VAULT_PROVIDER: akeyless
                   ONLY_NP: x
                 """);
-        List<EnvVar> prod = extract("poBackend/helm/values.yaml", """
+        List<EnvVar> prod = extract("orders-service/helm/values.yaml", """
                 externalsecrets:
                   enabled: true
                   akeyless:
                     enabled: true
                     secretStoreName: akeyless-secret-store
                     secretItems:
-                      JIRA_BASE_URL:
-                        path: "/Platform/prod/JIRA_BASE_URL"
-                      LANGFUSE_SECRET_KEY_PO:
-                        path: "/Platform/prod/LANGFUSE_SECRET_KEY_PO"
-                      KEYCLOAK_SERVER_URL:
-                        path: "/Platform/prod/KEYCLOAK_SERVER_URL"
+                      TICKETS_BASE_URL:
+                        path: "/Platform/prod/TICKETS_BASE_URL"
+                      TRACING_SECRET_KEY_APP:
+                        path: "/Platform/prod/TRACING_SECRET_KEY_APP"
+                      AUTH_SERVER_URL:
+                        path: "/Platform/prod/AUTH_SERVER_URL"
                 envVars:
                   DB_NAME: psqldb-p
                   VAULT_PROVIDER: akeyless
                 envSecrets:
-                  - name: JIRA_BASE_URL
-                    secretName: attlasian-mcp-server
-                    secretKey: JIRA_BASE_URL
-                  - name: LANGFUSE_SECRET_KEY
-                    secretName: ai-assist-po
-                    secretKey: LANGFUSE_SECRET_KEY_PO
+                  - name: TICKETS_BASE_URL
+                    secretName: shared-secrets
+                    secretKey: TICKETS_BASE_URL
+                  - name: TRACING_SECRET_KEY
+                    secretName: app-secrets
+                    secretKey: TRACING_SECRET_KEY_APP
                 """);
         AkeylessValues values = new AkeylessValues(AkeylessValues.parse(new ObjectMapper().readTree("""
                 {
-                  "/Platform/prod/JIRA_BASE_URL": "https://jira.example.com",
-                  "Platform": { "prod": { "LANGFUSE_SECRET_KEY_PO": "xyz" } },
-                  "secrets": [ { "path": "Platform/dev/KEYCLOAK_SERVER_URL", "value": "https://kc-other" } ]
+                  "/Platform/prod/TICKETS_BASE_URL": "https://tickets.example.com",
+                  "Platform": { "prod": { "TRACING_SECRET_KEY_APP": "xyz" } },
+                  "secrets": [ { "path": "Platform/dev/AUTH_SERVER_URL", "value": "https://kc-other" } ]
                 }
                 """)));
         Result r = EnvVarComparer.compare(values.apply(EnvVarExtractor.resolve(nonProd)), values.apply(EnvVarExtractor.resolve(prod)));
 
-        Row jira = row(r, "JIRA_BASE_URL");
-        assertEquals("SAME", jira.comparison(), jira.toString());
-        assertTrue(jira.sourceChanged());
-        assertEquals("RESOLVED", jira.right().valueState());
-        assertTrue(jira.right().injection().startsWith("envSecrets › Secret attlasian-mcp-server · key JIRA_BASE_URL › "
-                + "externalsecrets.akeyless.secretItems @ poBackend/helm/values.yaml:"), jira.right().injection());
+        Row tickets = row(r, "TICKETS_BASE_URL");
+        assertEquals("SAME", tickets.comparison(), tickets.toString());
+        assertTrue(tickets.sourceChanged());
+        assertEquals("RESOLVED", tickets.right().valueState());
+        assertTrue(tickets.right().injection().startsWith("envSecrets › Secret shared-secrets · key TICKETS_BASE_URL › "
+                + "externalsecrets.akeyless.secretItems @ orders-service/helm/values.yaml:"), tickets.right().injection());
 
-        assertEquals("VALUE_DIFFERS", row(r, "LANGFUSE_SECRET_KEY").comparison());
-        assertNull(row(r, "LANGFUSE_SECRET_KEY_PO"), "a secret item consumed by envSecrets is shown on the env row");
+        assertEquals("VALUE_DIFFERS", row(r, "TRACING_SECRET_KEY").comparison());
+        assertNull(row(r, "TRACING_SECRET_KEY_APP"), "a secret item consumed by envSecrets is shown on the env row");
         assertEquals("VALUE_DIFFERS", row(r, "DB_NAME").comparison());
         assertEquals("SAME", row(r, "VAULT_PROVIDER").comparison());
         assertFalse(row(r, "VAULT_PROVIDER").sourceChanged());
 
-        Row keycloak = row(r, "KEYCLOAK_SERVER_URL");
-        assertEquals("LITERAL", keycloak.left().valueState());
-        assertEquals(1, keycloak.leftOthers().size());
-        assertTrue(keycloak.duplicateConflict(), "envVars https://kc vs AKeyless https://kc-other");
-        assertEquals("NOT_IN_JSON", keycloak.right().valueState());
-        assertEquals("UNVERIFIED", keycloak.comparison());
+        Row auth = row(r, "AUTH_SERVER_URL");
+        assertEquals("LITERAL", auth.left().valueState());
+        assertEquals(1, auth.leftOthers().size());
+        assertTrue(auth.duplicateConflict(), "envVars https://kc vs AKeyless https://kc-other");
+        assertEquals("NOT_IN_JSON", auth.right().valueState());
+        assertEquals("UNVERIFIED", auth.comparison());
 
         assertEquals("LEFT_ONLY", row(r, "ONLY_NP").status());
         assertNull(row(r, "secretStoreName"));

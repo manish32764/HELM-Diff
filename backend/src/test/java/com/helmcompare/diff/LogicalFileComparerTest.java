@@ -6,6 +6,7 @@ import com.helmcompare.diff.LogicalFileComparer.Status;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,6 +145,74 @@ class LogicalFileComparerTest {
         assertEquals("spec.containers[name=app].volumeMounts[name=cache]", added.path());
         assertEquals(8, added.rightStart());
         assertEquals(8, added.leftAnchor(), "cache would follow the data mount (left lines 7–8)");
+    }
+
+    @Test
+    void changedIngressHostIsOneValueChangeNotARemovedAndAddedBlock() {
+        String left = """
+                ingress:
+                  hosts:
+                    - host: app.nonprod.example.com
+                      http:
+                        paths:
+                          - backend:
+                              service:
+                                name: orders-api
+                                port:
+                                  number: 9001
+                            path: /orders/api(/|$)(.*)
+                            pathType: ImplementationSpecific
+                  tls:
+                    - secretName: application-crt
+                      hosts:
+                        - app.nonprod.example.com
+                """;
+        String right = left.replace("app.nonprod", "app.prod");
+        Result r = compare("values.yaml", left, right);
+        assertEquals(2, r.diffs().size(), () -> r.diffs().toString());
+        Diff host = r.diffs().get(0);
+        assertEquals("CHANGED", host.kind());
+        assertEquals("ingress.hosts[host=app.nonprod.example.com].host", host.path());
+        assertEquals(3, host.leftStart());
+        assertEquals(3, host.leftEnd(), "only the host line, not the whole block");
+        assertEquals(3, host.rightStart());
+        assertEquals("CHANGED", r.diffs().get(1).kind());
+        assertEquals("ingress.tls[secretName=application-crt].hosts[1]", r.diffs().get(1).path());
+        assertEquals(16, r.diffs().get(1).leftStart());
+    }
+
+    @Test
+    void differentVolumesAreRemovedAndAdded() {
+        String left = """
+                volumes:
+                  - name: tmp
+                    emptyDir: {}
+                  - name: internal-ca
+                    secret:
+                      secretName: internal-ca-cert
+                volumeMounts:
+                  - name: tmp
+                    mountPath: /tmp
+                  - name: internal-ca
+                    mountPath: /var/run/secrets/internal-ca
+                """;
+        String right = """
+                volumes:
+                  - name: tmp
+                    emptyDir: {}
+                  - name: ssl-ca
+                    secret:
+                      secretName: ssl-ca-cert
+                volumeMounts:
+                  - name: tmp
+                    mountPath: /tmp
+                  - name: ssl-ca
+                    mountPath: /var/run/secrets/ssl-ca
+                """;
+        Result r = compare("values.yaml", left, right);
+        assertEquals(List.of("REMOVED volumes[name=internal-ca]", "ADDED volumes[name=ssl-ca]",
+                        "REMOVED volumeMounts[name=internal-ca]", "ADDED volumeMounts[name=ssl-ca]"),
+                r.diffs().stream().map(d -> d.kind() + " " + d.path()).toList());
     }
 
     @Test

@@ -103,6 +103,8 @@ function FileCompare({ id, view, onBack, initialDiff }: { id: string; view: File
         { pane: leftRef.current, start: d.leftStart || d.leftAnchor || d.rightStart, end: d.leftStart ? d.leftEnd : 0 },
         { pane: rightRef.current, start: d.rightStart || d.rightAnchor || d.leftStart, end: d.rightStart ? d.rightEnd : 0 },
       ])
+      // the scroll events of this alignment may arrive late: they must not be replayed on the other pane
+      lastTop.current = { left: leftRef.current?.scrollTop ?? 0, right: rightRef.current?.scrollTop ?? 0 }
       setTimeout(() => { programmatic.current = false }, 150)
     })
     document.querySelector(`[data-diff="${d.id}"]`)?.scrollIntoView({ block: 'nearest' })
