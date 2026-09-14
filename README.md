@@ -10,22 +10,28 @@ HELM-Compare/
 └── frontend/   React 19 · TypeScript · Vite 7      (light, Apple-inspired UI)
 ```
 
-## Compare two folders (home screen)
+## Compare two or three folders (home screen)
 
-1. Choose the **left** and **right** parent folders. Each contains one sub-folder per microservice with its Helm chart.
-   Give each side a **label** (e.g. `NON-PROD`, `PROD`); without one the folder name is used. When an environment reads
-   secrets from AKeyless, also choose its **AKeyless values JSON** — one file per environment with the actual value of
-   each path:
+1. Choose two or three parent folders (**A**, **B** and optionally **C**). Each contains one sub-folder per microservice
+   with its Helm chart. Give each folder a **label** (e.g. `NON-PROD`, `PROD`, `UAT`); without one the folder name is
+   used. When an environment reads secrets from AKeyless, also choose its **AKeyless values JSON** — one file per
+   environment with the actual value of each path:
 
    ```json
    { "/Platform/team/app/common/API_KEY": "value", "/Platform/team/app/dev/CLIENT_ID": "…" }
    ```
 
    Nested folders (`{ "Platform": { "KPS": { … } } }`) and lists (`[{ "path": "…", "value": "…" }]`) also work. The values
-   are stored with the comparison (`data/folder-compares/{id}/secret-values-left|right.json`) and deleted with it.
-2. The comparison lists the **first-level (microservice) folders** of both sides with their status. Double-click a folder
-   (or **OPEN ↗**) to open its complete Helm chart tree in a **new tab**; **ENV ↗** opens its environment variables.
-3. In the chart tab, click a file to open the **file-to-file view**. Each pane is titled `LABEL\relative\path`.
+   are stored with the comparison (`data/folder-compares/{id}/secret-values-side-N.json`) and deleted with it.
+2. The comparison lists the **first-level (microservice) folders** of every folder side by side, in equal-width columns
+   that each scroll sideways on their own while the page scrolls vertically. The status says *Identical*,
+   *Logically same*, *N differ* or where something is missing (*Only in PROD*, *Missing in UAT*); the summary tiles
+   filter the list. With three folders, **Shown / Hidden** on each folder card hides one folder and compares the other
+   two; the choice applies to every tab of the comparison (chart, file, differences, env variables) and to exports.
+   Double-click a folder (or **Chart ↗**) to open its complete Helm chart tree in a **new tab**; **Env ↗** opens its
+   environment variables.
+3. In the chart tab, click a file to open the **file-to-file view** with one pane per shown folder. Each pane is titled
+   `LABEL\relative\path`. With three folders every logical difference is one row with the value of each folder.
    **Show logical differences** lists what really changed for Kubernetes; the panel can be collapsed / expanded,
    maximised, or opened in a **separate tab** (selecting a difference there highlights it in the file tab).
    **Code only** shows just the two files, with previous / next difference buttons.

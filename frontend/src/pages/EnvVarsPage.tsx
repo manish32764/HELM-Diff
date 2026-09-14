@@ -3,12 +3,14 @@ import { api } from '../api/client'
 import type { EnvRow, EnvSource, EnvVar, EnvView } from '../api/types'
 import { DiffText } from '../components/DiffText'
 import { ExportMenu } from '../components/ExportMenu'
+import { SideCards } from '../components/Sides'
 import { Button, SearchInput, Segmented, Spinner, useToast } from '../components/ui'
-import { closeTab, sideTitle } from '../lib/sides'
+import { closeTab, sideLetter, sidesParam, sideTitle, useVisibleSides } from '../lib/sides'
 import { useAsync } from '../lib/useAsync'
 
-type Verdict = 'LEFT_ONLY' | 'RIGHT_ONLY' | 'VALUE_DIFFERS' | 'UNVERIFIED' | 'SAME'
-type Filter = 'ALL' | Verdict
+type Verdict = 'MISSING' | 'VALUE_DIFFERS' | 'UNVERIFIED' | 'SAME'
+/** `MISSING:1` — rows not defined in folder 1. */
+type Filter = 'ALL' | 'VALUE_DIFFERS' | 'UNVERIFIED' | 'SAME' | `MISSING:${number}`
 type Scope = 'FILE' | 'FOLDER'
 
 const SOURCE: Record<EnvSource, [string, string]> = {
@@ -23,14 +25,19 @@ const SOURCE: Record<EnvSource, [string, string]> = {
   FIELD_REF: ['Field ref', 'tb-blue'],
 }
 
-const SEVERITY: Record<Verdict, number> = { LEFT_ONLY: 0, RIGHT_ONLY: 0, VALUE_DIFFERS: 1, UNVERIFIED: 2, SAME: 3 }
+const SEVERITY: Record<Verdict, number> = { MISSING: 0, VALUE_DIFFERS: 1, UNVERIFIED: 2, SAME: 3 }
 
-const verdictOf = (r: EnvRow): Verdict => r.status === 'COMMON' ? r.comparison! : r.status
+const verdictOf = (r: EnvRow): Verdict => (r.missingIn.length > 0 ? 'MISSING' : r.comparison ?? 'UNVERIFIED')
+
+/** Most folders a comparison can have; the stored choice is checked against the real number by the backend. */
+const MAX_SIDES = 3
 
 export function EnvVarsPage({ id, path, scope }: { id: string; path: string; scope?: string }) {
   const startsOnFolder = scope === 'FOLDER' || !/\.[A-Za-z0-9]+$/.test(path)
   const [currentScope, setCurrentScope] = useState<Scope>(startsOnFolder ? 'FOLDER' : 'FILE')
-  const data = useAsync(() => api.folderEnv(id, path, currentScope), [id, path, currentScope])
+  const { visible, toggle } = useVisibleSides(id, MAX_SIDES)
+  const param = sidesParam(visible)
+  const data = useAsync(() => api.folderEnv(id, path, currentScope, param), [id, path, currentScope, param])
   const [filter, setFilter] = useState<Filter>('ALL')
   const [query, setQuery] = useState('')
   const [showInjected, setShowInjected] = useState(true)
@@ -42,23 +49,34 @@ export function EnvVarsPage({ id, path, scope }: { id: string; path: string; sco
   }, [path])
 
   const view = data.data
+  const shown = view?.shown ?? []
+  const titles = useMemo(() => view?.sides.map(sideTitle) ?? [], [view])
   const isFile = /\.[A-Za-z0-9]+$/.test(path)
   const fileName = path.split('/').pop()
   const topFolder = path.includes('/') ? path.slice(0, path.indexOf('/')) : path
-  const left = view ? sideTitle(view.leftName, view.leftLabel) : ''
-  const right = view ? sideTitle(view.rightName, view.rightLabel) : ''
+
+  // a filter on a folder that is no longer shown
+  useEffect(() => {
+    if (filter.startsWith('MISSING:') && view && !view.shown.includes(Number(filter.slice(8)))) setFilter('ALL')
+  }, [filter, view])
 
   const rows = useMemo(() => {
     const q = query.toLowerCase()
-    const matches = (v?: EnvVar) => !!v && [v.name, v.effectiveValue, v.reference, v.akeylessPath, v.injection]
+    const matches = (v?: EnvVar | null) => !!v && [v.name, v.effectiveValue, v.reference, v.akeylessPath, v.injection]
       .some((t) => (t ?? '').toLowerCase().includes(q))
+    const passes = (r: EnvRow) => {
+      if (filter === 'ALL') return true
+      if (filter.startsWith('MISSING:')) return r.missingIn.includes(Number(filter.slice(8)))
+      return r.missingIn.length === 0 && r.comparison === filter
+    }
     return (view?.rows ?? [])
-      .filter((r) => (filter === 'ALL' || verdictOf(r) === filter) && (!q || matches(r.left) || matches(r.right)))
+      .filter((r) => passes(r) && (!q || r.vars.some(matches)))
       .sort((a, b) => SEVERITY[verdictOf(a)] - SEVERITY[verdictOf(b)])
   }, [view, filter, query])
 
   const s = view?.summary
   const cols = (showInjected ? 1 : 0) + (showValue ? 1 : 0)
+  const minWidth = 380 + shown.length * cols * (shown.length > 2 ? (cols === 2 ? 170 : 260) : (cols === 2 ? 240 : 300))
 
   return (
     <div className="env-page">
@@ -66,14 +84,21 @@ export function EnvVarsPage({ id, path, scope }: { id: string; path: string; sco
         <div style={{ minWidth: 0 }}>
           <div className="eyebrow">Environment variables &amp; secrets · {currentScope === 'FILE' ? path : (view?.scopePath || topFolder || 'all folders')}</div>
           <h1 className="env-title">
-            {view ? <><span className="mono">{left}</span> <span className="faint">↔</span> <span className="mono">{right}</span></> : '…'}
+            {view ? shown.map((side, k) => (
+              <span key={side}>{k > 0 && <span className="faint"> ↔ </span>}<span className="mono">{titles[side]}</span></span>
+            )) : '…'}
           </h1>
         </div>
         <div className="actions">
-          {view && <ExportMenu url={(f) => api.folderEnvExportUrl(id, path, currentScope, f, showSecrets)} formats={['xlsx', 'csv', 'html']} />}
+          {view && <ExportMenu url={(f) => api.folderEnvExportUrl(id, path, currentScope, f, showSecrets, sidesParam(shown))} formats={['xlsx', 'csv', 'html']} />}
           <Button onClick={() => closeTab(`/folders/${id}`)}>Close tab</Button>
         </div>
       </header>
+
+      {view && view.sides.length > 2 && (
+        <SideCards sides={view.sides} visible={shown} onToggle={toggle} compact
+          detail={(side) => shown.includes(side) ? `${view.summary.counts[side]} variables` : 'hidden'} />
+      )}
 
       <div className="env-controls">
         {isFile && (
@@ -101,8 +126,7 @@ export function EnvVarsPage({ id, path, scope }: { id: string; path: string; sco
           <div className="env-tabs" role="tablist">
             {([
               ['ALL', 'All', s.total, 'all'],
-              ['LEFT_ONLY', `Missing in ${right}`, s.leftOnly, 'missing'],
-              ['RIGHT_ONLY', `Missing in ${left}`, s.rightOnly, 'missing'],
+              ...shown.map((side) => [`MISSING:${side}`, `Missing in ${titles[side]}`, s.missing[side], 'missing']),
               ['VALUE_DIFFERS', 'Different value', s.valueDiffers, 'diff'],
               ['UNVERIFIED', "Can't verify", s.unverified, 'unverified'],
               ['SAME', 'Same value', s.same, 'same'],
@@ -114,26 +138,29 @@ export function EnvVarsPage({ id, path, scope }: { id: string; path: string; sco
             ))}
           </div>
 
-          <SecretsNote view={view} left={left} right={right} />
+          <SecretsNote view={view} titles={titles} />
 
           <div className="xl-wrap">
-            <table className="xl env-xl" style={{ minWidth: cols === 2 ? 1100 : 780 }}>
+            <table className="xl env-xl" style={{ minWidth }}>
               <colgroup>
                 <col style={{ width: 44 }} />
-                <col style={{ width: cols === 2 ? '16%' : '22%' }} />
-                {Array.from({ length: cols * 2 }, (_, i) => <col key={i} />)}
+                <col style={{ width: shown.length > 2 ? 190 : cols === 2 ? '16%' : '22%' }} />
+                {Array.from({ length: cols * shown.length }, (_, i) => <col key={i} />)}
                 <col style={{ width: 170 }} />
               </colgroup>
               <thead>
                 <tr className="xl-group">
                   <th rowSpan={2} className="xl-num">#</th>
                   <th rowSpan={2}>Variable</th>
-                  <th colSpan={cols} className="xl-right-start">{left}</th>
-                  <th colSpan={cols} className="xl-right-start">{right}</th>
+                  {shown.map((side) => (
+                    <th key={side} colSpan={cols} className={`xl-right-start side-tone-${side}`}>
+                      <span className="side-letter sm">{sideLetter(side)}</span> {titles[side]}
+                    </th>
+                  ))}
                   <th rowSpan={2} className="xl-right-start">Result</th>
                 </tr>
                 <tr>
-                  {[0, 1].map((side) => (
+                  {shown.map((side) => (
                     <Fragment key={side}>
                       {showInjected && <th className="xl-right-start">Injected via</th>}
                       {showValue && <th className={showInjected ? '' : 'xl-right-start'}>Value</th>}
@@ -142,16 +169,16 @@ export function EnvVarsPage({ id, path, scope }: { id: string; path: string; sco
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 && <tr><td colSpan={3 + cols * 2} className="xl-empty">No variables match.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={3 + cols * shown.length} className="xl-empty">No variables match.</td></tr>}
                 {rows.map((r, i) => (
                   <tr key={r.id} className={`xl-row env-v-${verdictOf(r).toLowerCase()}`}>
                     <td className="xl-num">{i + 1}</td>
-                    <td><VariableName row={r} /></td>
-                    <SideCells v={r.left} other={r.right} others={r.leftOthers} row={r} missingIn={left}
-                      showInjected={showInjected} showValue={showValue} showSecrets={showSecrets} />
-                    <SideCells v={r.right} other={r.left} others={r.rightOthers} row={r} missingIn={right}
-                      showInjected={showInjected} showValue={showValue} showSecrets={showSecrets} />
-                    <td className="xl-right-start"><Result row={r} left={left} right={right} /></td>
+                    <td><VariableName row={r} shown={shown} /></td>
+                    {shown.map((side) => (
+                      <SideCells key={side} side={side} row={r} shown={shown} title={titles[side]}
+                        showInjected={showInjected} showValue={showValue} showSecrets={showSecrets} />
+                    ))}
+                    <td className="xl-right-start"><Result row={r} shown={shown} titles={titles} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -173,16 +200,18 @@ function Check({ label, checked, onChange, disabled }: { label: string; checked:
 }
 
 /** Which JSON each environment uses, and AKeyless paths whose value is still unknown. */
-function SecretsNote({ view, left, right }: { view: EnvView; left: string; right: string }) {
+function SecretsNote({ view, titles }: { view: EnvView; titles: string[] }) {
   const [open, setOpen] = useState(false)
   const toast = useToast()
   const s = view.secrets
-  if (s.referenced === 0 && s.left.paths === 0 && s.right.paths === 0) return null
+  if (s.referenced === 0 && view.shown.every((side) => s.sides[side].paths === 0)) return null
 
-  const describe = (title: string, info: EnvView['secrets']['left']) =>
-    info.paths ? `${title}: ${info.files.join(', ')} (${info.paths} paths)` : `${title}: no JSON`
-  const missing = (side: 'LEFT' | 'RIGHT') => s.missing.filter((m) => m.side === side)
-  const copyTemplate = async (side: 'LEFT' | 'RIGHT') => {
+  const describe = (side: number) => {
+    const info = s.sides[side]
+    return info.paths ? `${titles[side]}: ${info.files.join(', ')} (${info.paths} paths)` : `${titles[side]}: no JSON`
+  }
+  const missing = (side: number) => s.missing.filter((m) => m.side === side)
+  const copyTemplate = async (side: number) => {
     const paths = [...new Set(missing(side).map((m) => m.path.split(' › ')[0]))]
     await navigator.clipboard.writeText(JSON.stringify(Object.fromEntries(paths.map((p) => [p, ''])), null, 2))
     toast('JSON template copied')
@@ -191,19 +220,18 @@ function SecretsNote({ view, left, right }: { view: EnvView; left: string; right
   return (
     <div className="env-secrets">
       <span className="env-secrets-title">AKeyless values</span>
-      <span>{describe(left, s.left)}</span>
-      <span className="faint">·</span>
-      <span>{describe(right, s.right)}</span>
-      <span className="faint">·</span>
+      {view.shown.map((side) => (
+        <Fragment key={side}><span>{describe(side)}</span><span className="faint">·</span></Fragment>
+      ))}
       <span><b>{s.resolved}</b> of {s.referenced} resolved</span>
       {s.missing.length > 0 && (
         <button className="link-btn warn" onClick={() => setOpen((o) => !o)}>{s.missing.length} unknown {open ? '▴' : '▾'}</button>
       )}
       {open && (
         <div className="env-secrets-missing">
-          {(['LEFT', 'RIGHT'] as const).filter((side) => missing(side).length > 0).map((side) => (
+          {view.shown.filter((side) => missing(side).length > 0).map((side) => (
             <div key={side}>
-              <b className="small">{side === 'LEFT' ? left : right}</b>{' '}
+              <b className="small">{titles[side]}</b>{' '}
               <button className="link-btn" onClick={() => copyTemplate(side)}>Copy JSON template</button>
               <ul>
                 {missing(side).map((m, i) => <li key={i}><span className="mono">{m.variable}</span> <span className="mono faint">{m.path}</span></li>)}
@@ -217,24 +245,30 @@ function SecretsNote({ view, left, right }: { view: EnvView; left: string; right
   )
 }
 
-function VariableName({ row }: { row: EnvRow }) {
-  const l = row.left?.name
-  const r = row.right?.name
+const present = (r: EnvRow, shown: number[]) => shown.map((s) => r.vars[s]).filter((v): v is EnvVar => !!v)
+
+function VariableName({ row, shown }: { row: EnvRow; shown: number[] }) {
+  const names = [...new Set(present(row, shown).map((v) => v.name))]
   return (
     <>
-      <div className="xl-name">{l ?? r}</div>
-      {l && r && l !== r && <div className="xl-meta">↔ <span className="mono">{r}</span></div>}
+      <div className="xl-name">{names[0]}</div>
+      {names.slice(1).map((n) => <div key={n} className="xl-meta">↔ <span className="mono">{n}</span></div>)}
     </>
   )
 }
 
-function SideCells({ v, other, others, row, missingIn, showInjected, showValue, showSecrets }: {
-  v?: EnvVar; other?: EnvVar; others: EnvVar[]; row: EnvRow; missingIn: string
+function SideCells({ side, row, shown, title, showInjected, showValue, showSecrets }: {
+  side: number; row: EnvRow; shown: number[]; title: string
   showInjected: boolean; showValue: boolean; showSecrets: boolean
 }) {
   const cols = (showInjected ? 1 : 0) + (showValue ? 1 : 0)
-  if (!v) return <td colSpan={cols} className="xl-missing xl-missing-alert xl-right-start">Not defined in {missingIn}</td>
-  const tint = row.comparison === 'VALUE_DIFFERS' ? 'xl-changed' : row.comparison === 'UNVERIFIED' && v.effectiveValue == null ? 'xl-unknown' : ''
+  const v = row.vars[side]
+  if (!v) return <td colSpan={cols} className="xl-missing xl-missing-alert xl-right-start">Not defined in {title}</td>
+  const others = row.others[side] ?? []
+  const differs = row.comparison === 'VALUE_DIFFERS'
+  // highlight against the first other folder that defines the variable
+  const other = differs ? shown.filter((s) => s !== side).map((s) => row.vars[s]).find((x) => !!x) ?? undefined : undefined
+  const tint = differs ? 'xl-changed' : row.comparison === 'UNVERIFIED' && v.effectiveValue == null ? 'xl-unknown' : ''
   const duplicates = others.length > 0 && <Duplicates others={others} conflict={row.duplicateConflict} showSecrets={showSecrets} />
   return (
     <>
@@ -246,7 +280,7 @@ function SideCells({ v, other, others, row, missingIn, showInjected, showValue, 
       )}
       {showValue && (
         <td className={`${showInjected ? '' : 'xl-right-start'} ${tint}`}>
-          <Value v={v} other={row.comparison === 'VALUE_DIFFERS' ? other : undefined} showSecrets={showSecrets} />
+          <Value v={v} other={other} showSecrets={showSecrets} />
           {duplicates}
         </td>
       )}
@@ -288,7 +322,7 @@ const isSecret = (v: EnvVar) => v.valueState === 'RESOLVED' || v.kind === 'K8s S
 
 const UNKNOWN_VALUE: Record<string, string> = {
   NOT_IN_JSON: 'AKeyless path not in JSON',
-  NO_JSON: 'No AKeyless JSON for this side',
+  NO_JSON: 'No AKeyless JSON for this folder',
   UNKNOWN: 'Value is not in the chart',
 }
 
@@ -298,7 +332,7 @@ function Value({ v, other, showSecrets }: { v: EnvVar; other?: EnvVar; showSecre
   if (isSecret(v) && !showSecrets) return <span className="val-masked" title="Tick “Reveal secret values”">••••••••</span>
   if (value === '') return <span className="faint">(empty)</span>
   const against = other?.effectiveValue != null && !(isSecret(other) && !showSecrets) ? other.effectiveValue : undefined
-  return <span className="xl-value">{against !== undefined ? <DiffText value={value} against={against} /> : value}</span>
+  return <span className="xl-value">{against !== undefined && against !== value ? <DiffText value={value} against={against} /> : value}</span>
 }
 
 function Duplicates({ others, conflict, showSecrets }: { others: EnvVar[]; conflict: boolean; showSecrets: boolean }) {
@@ -318,17 +352,20 @@ function family(source: EnvSource) {
   return source === 'EMPTY' || source === 'TEMPLATE' ? 'Plain text' : SOURCE[source]?.[0] ?? source
 }
 
-function Result({ row, left, right }: { row: EnvRow; left: string; right: string }) {
+function Result({ row, shown, titles }: { row: EnvRow; shown: number[]; titles: string[] }) {
   const verdict = verdictOf(row)
+  const definedIn = shown.filter((s) => row.vars[s])
   const [cls, text] = {
-    LEFT_ONLY: ['v-missing', `Missing in ${right}`],
-    RIGHT_ONLY: ['v-missing', `Missing in ${left}`],
+    MISSING: ['v-missing', definedIn.length === 1 ? `Only in ${titles[definedIn[0]]}` : `Missing in ${row.missingIn.map((s) => titles[s]).join(', ')}`],
     VALUE_DIFFERS: ['v-diff', 'Different value'],
     UNVERIFIED: ['v-unverified', "Can't verify"],
     SAME: ['v-same', 'Same value'],
   }[verdict]
   const notes: string[] = []
-  if (row.sourceChanged && row.left && row.right) notes.push(`${family(row.left.source)} → ${family(row.right.source)}`)
+  if (verdict === 'MISSING' && row.comparison === 'VALUE_DIFFERS') notes.push('Values also differ')
+  if (row.sourceChanged) {
+    notes.push(present(row, shown).map((v) => family(v.source)).filter((f, i, all) => i === 0 || f !== all[i - 1]).join(' → '))
+  }
   if (row.match === 'SIMILAR_NAME') notes.push(`Similar name ${row.similarity}%`)
   return (
     <div className="stack-v" style={{ gap: 3 }}>

@@ -1,10 +1,12 @@
 package com.helmcompare.export;
 
 import com.helmcompare.diff.EnvVarExtractor;
-import com.helmcompare.diff.LogicalFileComparer;
+import com.helmcompare.diff.MultiEnvComparer;
+import com.helmcompare.diff.MultiFileComparer;
 import com.helmcompare.model.FolderCompare;
 import com.helmcompare.model.FolderCompare.Node;
 import com.helmcompare.service.FolderCompareService;
+import com.helmcompare.service.FolderStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.ZoneId;
@@ -13,8 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-/** Exports a folder comparison: folders, files and every logical difference with line numbers. */
+/** Exports a folder comparison (the chosen folders): folders, files and every logical difference with line numbers. */
 @Service
 public class FolderCompareExport {
 
@@ -29,59 +32,74 @@ public class FolderCompareExport {
         this.exports = exports;
     }
 
-    public ExportService.Export export(String id, String format) {
+    /** @param sidesParam the folders to include, e.g. "0,2"; all when null */
+    public ExportService.Export export(String id, String format, String sidesParam) {
         FolderCompare c = service.get(id);
-        String left = c.leftName + (c.leftLabel == null ? "" : " (" + c.leftLabel + ")");
-        String right = c.rightName + (c.rightLabel == null ? "" : " (" + c.rightLabel + ")");
-        String title = left + " vs " + right;
-        FolderCompare.Summary s = c.summary;
+        int[] sides = service.parseSides(c, sidesParam);
+        List<String> titles = FolderStatus.titles(c);
+        List<String> shownTitles = new ArrayList<>();
+        for (int s : sides) shownTitles.add(titles.get(s));
+        String title = joined(c, sides, " vs ");
 
         List<String[]> meta = new ArrayList<>();
-        meta.add(new String[]{"Left folder", left});
-        meta.add(new String[]{"Right folder", right});
+        for (int k = 0; k < sides.length; k++) meta.add(new String[]{"Folder " + (k + 1), describe(c.sides.get(sides[k]))});
         meta.add(new String[]{"Compared", TIME.format(c.createdAt)});
         meta.add(new String[]{"Comparison ID", c.id});
-        meta.add(new String[]{"Folders in left", String.valueOf(s.leftFolders)});
-        meta.add(new String[]{"Folders in right", String.valueOf(s.rightFolders)});
-        meta.add(new String[]{"Matched folders", String.valueOf(s.matchedFolders)});
-        meta.add(new String[]{"Identical folders", String.valueOf(s.identicalFolders)});
-        meta.add(new String[]{"Folders with differences", String.valueOf(s.differentFolders)});
-        meta.add(new String[]{"Folders only in left", String.valueOf(s.leftOnlyFolders)});
-        meta.add(new String[]{"Folders only in right", String.valueOf(s.rightOnlyFolders)});
-        meta.add(new String[]{"Files identical", String.valueOf(s.identicalFiles)});
-        meta.add(new String[]{"Files logically the same", String.valueOf(s.logicallySameFiles)});
-        meta.add(new String[]{"Files that differ", String.valueOf(s.differentFiles)});
-        meta.add(new String[]{"Files only in left", String.valueOf(s.leftOnlyFiles)});
-        meta.add(new String[]{"Files only in right", String.valueOf(s.rightOnlyFiles)});
 
         List<List<String>> folders = new ArrayList<>();
+        int[] folderCounts = new int[4];
         for (Node n : c.root.children) {
-            if (!n.dir) continue;
-            folders.add(List.of(n.name, n.status, String.valueOf(n.identical), String.valueOf(n.logicallySame),
-                    String.valueOf(n.differs), String.valueOf(n.leftOnly), String.valueOf(n.rightOnly), nz(n.reason)));
+            if (!n.dir || !FolderStatus.visible(n, sides)) continue;
+            FolderStatus.Eval e = FolderStatus.eval(n, sides, titles);
+            folderCounts[index(e.status())]++;
+            List<String> row = new ArrayList<>(List.of(n.name, e.status()));
+            for (int s : sides) row.add(n.present(s) ? "Yes" : "No");
+            row.addAll(List.of(String.valueOf(e.counts().identical()), String.valueOf(e.counts().logicallySame()),
+                    String.valueOf(e.counts().differs()), String.valueOf(e.counts().partial()), nz(e.reason())));
+            folders.add(row);
         }
+        FolderStatus.Counts files = FolderStatus.eval(c.root, sides, titles).counts();
+        meta.add(new String[]{"Folders", String.valueOf(folders.size())});
+        meta.add(new String[]{"Identical folders", String.valueOf(folderCounts[0])});
+        meta.add(new String[]{"Logically same folders", String.valueOf(folderCounts[1])});
+        meta.add(new String[]{"Folders with differences", String.valueOf(folderCounts[2])});
+        meta.add(new String[]{"Folders not in every folder", String.valueOf(folderCounts[3])});
+        meta.add(new String[]{"Files identical", String.valueOf(files.identical())});
+        meta.add(new String[]{"Files logically the same", String.valueOf(files.logicallySame())});
+        meta.add(new String[]{"Files that differ", String.valueOf(files.differs())});
+        meta.add(new String[]{"Files not in every folder", String.valueOf(files.partial())});
 
-        List<List<String>> files = new ArrayList<>();
+        List<List<String>> fileRows = new ArrayList<>();
         List<String> differing = new ArrayList<>();
-        collect(c.root, files, differing);
+        collect(c.root, sides, titles, fileRows, differing);
 
+        String key = FolderCompareService.key(sides);
         List<List<String>> diffs = new ArrayList<>();
         for (String path : differing) {
             if (diffs.size() >= MAX_DIFF_ROWS) break;
-            FolderCompareService.FileView view = service.file(id, path);
-            for (LogicalFileComparer.Diff d : view.differences()) {
-                diffs.add(List.of(path, d.kind(), d.path(), nz(d.left()), nz(d.right()),
-                        range(d.leftStart(), d.leftEnd()), range(d.rightStart(), d.rightEnd())));
+            FolderCompareService.Comparison comparison = service.file(id, path).comparisons().get(key);
+            for (MultiFileComparer.SideDiff d : comparison.differences()) {
+                List<String> row = new ArrayList<>(List.of(path, d.kind(), d.path()));
+                for (int s : sides) row.add(d.sides().contains(s) ? nz(d.values().get(s)) : "(not compared)");
+                for (int s : sides) row.add(range(d.starts().get(s), d.ends().get(s)));
+                diffs.add(row);
             }
         }
 
+        List<String> folderHeaders = new ArrayList<>(List.of("Folder", "Status"));
+        shownTitles.forEach(t -> folderHeaders.add("In " + t));
+        folderHeaders.addAll(List.of("Identical files", "Logically same", "Differ", "Not in every folder", "Details"));
+        List<String> fileHeaders = new ArrayList<>(List.of("File", "Status"));
+        fileHeaders.addAll(shownTitles);
+        fileHeaders.addAll(List.of("Logical differences", "Details"));
+        List<String> diffHeaders = new ArrayList<>(List.of("File", "Change", "Configuration"));
+        shownTitles.forEach(t -> diffHeaders.add(t + " value"));
+        shownTitles.forEach(t -> diffHeaders.add(t + " lines"));
+
         ExportService.Report report = new ExportService.Report(title, meta, List.of(
-                new ExportService.Table("Folders", List.of("Folder", "Status", "Identical files", "Logically same",
-                        "Differ", "Only in left", "Only in right", "Details"), folders, Set.of(1)),
-                new ExportService.Table("Files", List.of("File", "Status", "Left", "Right", "Logical differences", "Details"),
-                        files, Set.of(1)),
-                new ExportService.Table("Logical Differences", List.of("File", "Change", "Configuration", "Left value",
-                        "Right value", "Left lines", "Right lines"), diffs, Set.of(1))));
+                new ExportService.Table("Folders", folderHeaders, folders, Set.of(1)),
+                new ExportService.Table("Files", fileHeaders, fileRows, Set.of(1)),
+                new ExportService.Table("Logical Differences", diffHeaders, diffs, Set.of(1))));
 
         String base = slug(title) + "-" + c.id;
         return switch (format.toLowerCase(Locale.ROOT)) {
@@ -94,63 +112,66 @@ public class FolderCompareExport {
         };
     }
 
-    public ExportService.Export envExport(String id, String path, String scope, String format, boolean showSecrets) {
-        FolderCompareService.EnvView view = service.envVars(id, path, scope);
-        String left = view.leftName() + (view.leftLabel() == null ? "" : " (" + view.leftLabel() + ")");
-        String right = view.rightName() + (view.rightLabel() == null ? "" : " (" + view.rightLabel() + ")");
+    public ExportService.Export envExport(String id, String path, String scope, String format, boolean showSecrets, String sidesParam) {
+        FolderCompareService.EnvView view = service.envVars(id, path, scope, sidesParam);
+        List<Integer> sides = view.shown();
+        List<String> titles = view.sides().stream().map(FolderCompare.SideInfo::title).toList();
         String scopeText = "FOLDER".equals(view.scope()) ? "folder " + (view.scopePath().isEmpty() ? "(all)" : view.scopePath()) : "file " + view.path();
         String title = "Environment variables · " + scopeText;
         var s = view.summary();
 
         List<String[]> meta = new ArrayList<>();
-        meta.add(new String[]{"Left folder", left});
-        meta.add(new String[]{"Right folder", right});
+        for (int k = 0; k < sides.size(); k++) meta.add(new String[]{"Folder " + (k + 1), describe(view.sides().get(sides.get(k)))});
         meta.add(new String[]{"Scope", scopeText});
-        meta.add(new String[]{"Missing in right (only in left)", String.valueOf(s.leftOnly())});
-        meta.add(new String[]{"Missing in left (only in right)", String.valueOf(s.rightOnly())});
+        for (int side : sides) meta.add(new String[]{"Missing in " + titles.get(side), String.valueOf(s.missing().get(side))});
         meta.add(new String[]{"Different value", String.valueOf(s.valueDiffers())});
         meta.add(new String[]{"Cannot verify", String.valueOf(s.unverified())});
         meta.add(new String[]{"Same value", String.valueOf(s.same())});
         meta.add(new String[]{"Source changed (e.g. plain → AKeyless)", String.valueOf(s.sourceChanged())});
         meta.add(new String[]{"Matched by similar name", String.valueOf(s.similarNames())});
         meta.add(new String[]{"Defined more than once", String.valueOf(s.duplicates())});
-        meta.add(new String[]{"AKeyless values (left)", secretsText(view.secrets().left())});
-        meta.add(new String[]{"AKeyless values (right)", secretsText(view.secrets().right())});
+        for (int side : sides) {
+            meta.add(new String[]{"AKeyless values (" + titles.get(side) + ")", secretsText(view.secrets().sides().get(side))});
+        }
         meta.add(new String[]{"AKeyless references resolved", view.secrets().resolved() + " of " + view.secrets().referenced()});
         meta.add(new String[]{"Secret values", showSecrets ? "shown" : "masked"});
 
         List<List<String>> rows = new ArrayList<>();
         int n = 0;
-        for (var r : view.rows()) {
+        for (MultiEnvComparer.Row r : view.rows()) {
             n++;
-            String result = switch (r.status()) {
-                case "LEFT_ONLY", "RIGHT_ONLY" -> "MISSING";
-                default -> switch (r.comparison()) {
-                    case "SAME" -> "SAME";
-                    case "VALUE_DIFFERS" -> "DIFFERS";
-                    default -> "UNDETERMINED";
-                };
+            String result = !r.missingIn().isEmpty() ? "MISSING" : switch (r.comparison()) {
+                case "SAME" -> "SAME";
+                case "VALUE_DIFFERS" -> "DIFFERS";
+                default -> "UNDETERMINED";
             };
             List<String> notes = new ArrayList<>();
-            if ("LEFT_ONLY".equals(r.status())) notes.add("Not defined in " + view.rightName());
-            if ("RIGHT_ONLY".equals(r.status())) notes.add("Not defined in " + view.leftName());
-            if (r.sourceChanged()) notes.add(sourceText(r.left().source()) + " → " + sourceText(r.right().source()));
+            if (!r.missingIn().isEmpty()) {
+                notes.add("Not defined in " + r.missingIn().stream().map(titles::get).collect(Collectors.joining(", ")));
+            }
+            if (r.sourceChanged()) {
+                notes.add(sides.stream().filter(side -> r.vars().get(side) != null)
+                        .map(side -> sourceText(r.vars().get(side).source())).collect(Collectors.joining(" → ")));
+            }
             if ("SIMILAR_NAME".equals(r.match())) notes.add("Similar name (" + r.similarity() + "%)");
-            if (!r.leftOthers().isEmpty()) notes.add("Left defined " + (r.leftOthers().size() + 1) + "×");
-            if (!r.rightOthers().isEmpty()) notes.add("Right defined " + (r.rightOthers().size() + 1) + "×");
+            for (int side : sides) {
+                if (!r.others().get(side).isEmpty()) notes.add(titles.get(side) + " defined " + (r.others().get(side).size() + 1) + "×");
+            }
             if (r.duplicateConflict()) notes.add("duplicate definitions have different values");
-            List<String> row = new ArrayList<>(List.of(String.valueOf(n), r.left() != null ? r.left().name() : r.right().name(),
-                    result, String.join(" · ", notes)));
-            side(row, r.left(), showSecrets);
-            side(row, r.right(), showSecrets);
+            EnvVarExtractor.EnvVar first = sides.stream().map(side -> r.vars().get(side)).filter(v -> v != null).findFirst().orElseThrow();
+            List<String> row = new ArrayList<>(List.of(String.valueOf(n), first.name(), result, String.join(" · ", notes)));
+            for (int side : sides) side(row, r.vars().get(side), showSecrets);
             rows.add(row);
         }
-        ExportService.Report report = new ExportService.Report(title, meta, List.of(new ExportService.Table("Environment Variables",
-                List.of("#", "Variable", "Result", "Notes",
-                        "Left name", "Left injected via", "Left source", "Left value", "Left AKeyless path", "Left location",
-                        "Right name", "Right injected via", "Right source", "Right value", "Right AKeyless path", "Right location"),
-                rows, Set.of(2))));
-        String base = slug("env " + view.leftName() + " vs " + view.rightName() + " " + (view.scopePath().isEmpty() ? view.path() : view.scopePath())) + "-" + id;
+        List<String> headers = new ArrayList<>(List.of("#", "Variable", "Result", "Notes"));
+        for (int side : sides) {
+            String t = titles.get(side);
+            headers.addAll(List.of(t + " name", t + " injected via", t + " source", t + " value", t + " AKeyless path", t + " location"));
+        }
+        ExportService.Report report = new ExportService.Report(title, meta,
+                List.of(new ExportService.Table("Environment Variables", headers, rows, Set.of(2))));
+        String names = sides.stream().map(side -> view.sides().get(side).name).collect(Collectors.joining(" vs "));
+        String base = slug("env " + names + " " + (view.scopePath().isEmpty() ? view.path() : view.scopePath())) + "-" + id;
         return switch (format.toLowerCase(Locale.ROOT)) {
             case "csv" -> new ExportService.Export(base + ".csv", "text/csv;charset=UTF-8", exports.csv(report));
             case "html" -> new ExportService.Export(base + ".html", "text/html;charset=UTF-8", exports.html(report));
@@ -158,6 +179,25 @@ public class FolderCompareExport {
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", exports.xlsx(report));
             default -> throw new IllegalArgumentException("Unsupported export format: " + format);
         };
+    }
+
+    private static int index(String status) {
+        return switch (status) {
+            case FolderStatus.IDENTICAL -> 0;
+            case FolderStatus.LOGICALLY_IDENTICAL -> 1;
+            case FolderStatus.DIFFERS -> 2;
+            default -> 3;
+        };
+    }
+
+    private static String describe(FolderCompare.SideInfo side) {
+        return side.name + (side.label == null ? "" : " (" + side.label + ")");
+    }
+
+    private static String joined(FolderCompare c, int[] sides, String separator) {
+        List<String> parts = new ArrayList<>();
+        for (int s : sides) parts.add(describe(c.sides.get(s)));
+        return String.join(separator, parts);
     }
 
     private static String secretsText(FolderCompareService.SideSecrets s) {
@@ -203,15 +243,19 @@ public class FolderCompareExport {
         };
     }
 
-    private static void collect(Node node, List<List<String>> rows, List<String> differing) {
+    private static void collect(Node node, int[] sides, List<String> titles, List<List<String>> rows, List<String> differing) {
         for (Node child : node.children) {
+            if (!FolderStatus.visible(child, sides)) continue;
             if (child.dir) {
-                collect(child, rows, differing);
+                collect(child, sides, titles, rows, differing);
                 continue;
             }
-            rows.add(List.of(child.path, child.status, state(child.leftState), state(child.rightState),
-                    child.differences == 0 ? "" : String.valueOf(child.differences), nz(child.reason)));
-            if ("DIFFERS".equals(child.status)) differing.add(child.path);
+            FolderStatus.Eval e = FolderStatus.eval(child, sides, titles);
+            List<String> row = new ArrayList<>(List.of(child.path, e.status()));
+            for (int s : sides) row.add(state(child.state(s)));
+            row.addAll(List.of(e.differences() == 0 ? "" : String.valueOf(e.differences()), nz(e.reason())));
+            rows.add(row);
+            if (FolderStatus.DIFFERS.equals(e.status())) differing.add(child.path);
         }
     }
 

@@ -197,8 +197,12 @@ public final class EnvVarComparer {
     }
 
     private static boolean conflict(Group g) {
-        EnvVar p = g.primary();
-        for (EnvVar o : g.others()) {
+        return conflict(g.primary(), g.others());
+    }
+
+    /** A further definition of the variable on the same side yields another value than the primary one. */
+    static boolean conflict(EnvVar p, List<EnvVar> others) {
+        for (EnvVar o : others) {
             if (p.effectiveValue() != null && o.effectiveValue() != null) {
                 if (!p.effectiveValue().strip().equals(o.effectiveValue().strip())) return true;
             } else if (p.akeylessPath() != null && o.akeylessPath() != null && !p.akeylessPath().equals(o.akeylessPath())) {
@@ -208,7 +212,7 @@ public final class EnvVarComparer {
         return false;
     }
 
-    private static String family(EnvVar v) {
+    static String family(EnvVar v) {
         return switch (v.source()) {
             case "PLAIN", "EMPTY", "TEMPLATE" -> "PLAIN";
             default -> v.source();

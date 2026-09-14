@@ -62,7 +62,7 @@ public class ExportService {
     private static final Set<String> ORANGE = Set.of("DIFFERS", "CHANGED", "REVIEW", "REQUIRES_REVIEW", "CHANGED_IMPLEMENTATION",
             "DIFFERENT_IMPLEMENTATION", "IMPLEMENTED_DIFFERENTLY", "CONSISTENT_WITH_REVIEW", "SIMILAR", "OPEN");
     private static final Set<String> BLUE = Set.of("ADDED", "NEW_PROD_CHANGE", "NEW_CHANGE", "VERSION_CHANGE", "PREPARATION");
-    private static final Set<String> PURPLE = Set.of("LEFT_ONLY", "RIGHT_ONLY", "NO_LONGER_APPLICABLE", "POTENTIALLY_IRRELEVANT", "NO_LONGER_PRESENT",
+    private static final Set<String> PURPLE = Set.of("LEFT_ONLY", "RIGHT_ONLY", "PARTIAL","NO_LONGER_APPLICABLE", "POTENTIALLY_IRRELEVANT", "NO_LONGER_PRESENT",
             "NOT_APPLICABLE", "UNDETERMINED", "DIFFERENT");
 
     private final ObjectMapper mapper;
@@ -477,6 +477,7 @@ public class ExportService {
             case "LOGICALLY_IDENTICAL" -> "Logically same";
             case "LEFT_ONLY" -> "Only in left";
             case "RIGHT_ONLY" -> "Only in right";
+            case "PARTIAL" -> "Not in every folder";
             default -> {
                 if (!code.equals(code.toUpperCase(Locale.ROOT)) || code.contains(" ")) yield code;
                 String s = code.replace('_', ' ').toLowerCase(Locale.ROOT);

@@ -90,16 +90,17 @@ export const api = {
   folderFile: (id: string, path: string) =>
     request<FileView>(`/api/folder-compares/${id}/file?path=${encodeURIComponent(path)}`),
   deleteFolderCompare: (id: string) => request<void>(`/api/folder-compares/${id}`, { method: 'DELETE' }),
-  folderExportUrl: (id: string, format: string) => `/api/folder-compares/${id}/export?format=${format}`,
-  folderEnv: (id: string, path: string, scope: 'FILE' | 'FOLDER') =>
-    request<EnvView>(`/api/folder-compares/${id}/env?path=${encodeURIComponent(path)}&scope=${scope}`),
-  folderEnvExportUrl: (id: string, path: string, scope: string, format: string, showSecrets = false) =>
-    `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}&showSecrets=${showSecrets}`,
-  uploadSecretValues: (id: string, side: 'left' | 'right' | 'both', files: File[], replace: boolean) => {
+  /** @param sides the shown folders, e.g. "0,2" */
+  folderExportUrl: (id: string, format: string, sides: string) => `/api/folder-compares/${id}/export?format=${format}&sides=${sides}`,
+  folderEnv: (id: string, path: string, scope: 'FILE' | 'FOLDER', sides: string) =>
+    request<EnvView>(`/api/folder-compares/${id}/env?path=${encodeURIComponent(path)}&scope=${scope}&sides=${sides}`),
+  folderEnvExportUrl: (id: string, path: string, scope: string, format: string, showSecrets: boolean, sides: string) =>
+    `/api/folder-compares/${id}/env/export?path=${encodeURIComponent(path)}&scope=${scope}&format=${format}&showSecrets=${showSecrets}&sides=${sides}`,
+  uploadSecretValues: (id: string, side: number | 'all', files: File[], replace: boolean) => {
     const form = new FormData()
     files.forEach((f) => form.append('file', f))
     return request<SecretValuesInfo>(`/api/folder-compares/${id}/secret-values?side=${side}&replace=${replace}`, { method: 'POST', body: form })
   },
-  clearSecretValues: (id: string, side: 'left' | 'right' | 'both') =>
+  clearSecretValues: (id: string, side: number | 'all') =>
     request<void>(`/api/folder-compares/${id}/secret-values?side=${side}`, { method: 'DELETE' }),
 }

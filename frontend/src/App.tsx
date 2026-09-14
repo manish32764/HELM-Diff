@@ -103,7 +103,8 @@ export default function App() {
     return `/${first}` === to
   }
   const view = first === 'folders' ? route.segments[2] : undefined
-  const mainClass = first !== 'folders' ? '' : !view || view === 'chart' ? 'fill' : 'compact'
+  /** Folder pages scroll as a whole page; only the file compare keeps its code panes one screen tall. */
+  const mainClass = first === 'folders' && view ? 'compact' : ''
   /** Charts, files, env variables and differences are focused views (usually their own tab) without the sidebar. */
   const standalone = !!view
 

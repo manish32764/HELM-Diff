@@ -295,53 +295,51 @@ export interface SourceView { path: string; lines: string[]; maskedLines: number
 
 export interface SearchHit { app: string; evaluatedOn: string; chartId: string; result: ExpectationResult }
 
-// ───────────── folder comparison ─────────────
+// ───────────── folder comparison (two or three folders) ─────────────
 
-export type FolderStatus = 'IDENTICAL' | 'LOGICALLY_IDENTICAL' | 'DIFFERS' | 'LEFT_ONLY' | 'RIGHT_ONLY'
+/** PARTIAL: the file or folder does not exist in every compared folder. */
+export type FolderStatus = 'IDENTICAL' | 'LOGICALLY_IDENTICAL' | 'DIFFERS' | 'PARTIAL'
 export type SideState = 'PRESENT' | 'EMPTY' | 'MISSING'
+
+export interface SideInfo { name: string; label?: string }
+
+export interface PairResult {
+  status: 'IDENTICAL' | 'LOGICALLY_IDENTICAL' | 'DIFFERS'
+  reason?: string
+  differences: number
+}
 
 export interface FolderNode {
   name: string
   path: string
   dir: boolean
-  status: FolderStatus
-  leftState: SideState
-  rightState: SideState
-  reason?: string
-  differences: number
-  leftSize: number
-  rightSize: number
-  identical: number
-  logicallySame: number
-  differs: number
-  leftOnly: number
-  rightOnly: number
+  /** Per folder (side). */
+  states: SideState[]
+  /** Per folder, -1 when missing (files only). */
+  sizes?: number[]
+  /** Files only: "i-j" for every pair of folders that both have the file. */
+  pairs?: Record<string, PairResult>
   children?: FolderNode[]
 }
 
 export interface FolderSummary {
-  leftFolders: number
-  rightFolders: number
-  matchedFolders: number
-  leftOnlyFolders: number
-  rightOnlyFolders: number
+  folders: number
   identicalFolders: number
+  logicallySameFolders: number
   differentFolders: number
+  partialFolders: number
   files: number
   identicalFiles: number
   logicallySameFiles: number
   differentFiles: number
-  leftOnlyFiles: number
-  rightOnlyFiles: number
+  partialFiles: number
+  sideFolders: number[]
 }
 
 export interface FolderCompareInfo {
   id: string
   createdAt: string
-  leftName: string
-  rightName: string
-  leftLabel?: string
-  rightLabel?: string
+  sides: SideInfo[]
   summary: FolderSummary
 }
 
@@ -349,20 +347,34 @@ export interface FolderCompare extends FolderCompareInfo {
   root: FolderNode
 }
 
-export interface LogicalDiff {
+/** One logical difference; every list is indexed by folder (side). */
+export interface SideDiff {
   id: string
-  kind: 'ADDED' | 'REMOVED' | 'CHANGED'
+  /** CHANGED: every compared folder has the setting · MISSING: some do not. */
+  kind: 'CHANGED' | 'MISSING'
   path: string
   description: string
-  left?: string
-  right?: string
-  leftStart: number
-  leftEnd: number
-  rightStart: number
-  rightEnd: number
-  /** Line to show on each side: the block's start, or where it would appear when it exists on the other side only. */
-  leftAnchor: number
-  rightAnchor: number
+  /** The folders this row compares (normally every shown folder). */
+  sides: number[]
+  /** null when absent in that folder. */
+  values: (string | null)[]
+  starts: number[]
+  ends: number[]
+  /** Line to show: the block's start, or where it would appear when it is absent there. */
+  anchors: number[]
+}
+
+export interface SideFile { name: string; label?: string; state: SideState; lines?: string[] }
+
+export interface FileComparison { status: FolderStatus; reason: string; differences: SideDiff[] }
+
+export interface FileView {
+  path: string
+  name: string
+  binary: boolean
+  sides: SideFile[]
+  /** Key: the compared folders joined by "-" ("0-1", "0-2", "1-2", "0-1-2"). */
+  comparisons: Record<string, FileComparison>
 }
 
 export type EnvSource = 'PLAIN' | 'EMPTY' | 'TEMPLATE' | 'AKEYLESS' | 'K8S_SECRET' | 'EXTERNAL_SECRET' | 'VAULT' | 'CONFIGMAP' | 'FIELD_REF'
@@ -387,25 +399,25 @@ export interface EnvVar {
   valueState: EnvValueState
 }
 
+/** Lists are indexed by folder (side); folders that are not compared hold null / []. */
 export interface EnvRow {
   id: string
-  status: 'COMMON' | 'LEFT_ONLY' | 'RIGHT_ONLY'
-  match?: 'SAME_NAME' | 'SIMILAR_NAME'
+  vars: (EnvVar | null)[]
+  others: EnvVar[][]
+  match: 'SAME_NAME' | 'SIMILAR_NAME'
   similarity?: number
-  left?: EnvVar
-  right?: EnvVar
+  /** Over the folders that define the variable; undefined when only one does. */
   comparison?: 'SAME' | 'VALUE_DIFFERS' | 'UNVERIFIED'
   sourceChanged: boolean
-  leftOthers: EnvVar[]
-  rightOthers: EnvVar[]
   duplicateConflict: boolean
+  missingIn: number[]
 }
 
 export interface SideSecrets { paths: number; files: string[]; updatedAt?: string }
 
-export interface SecretValuesInfo { left: SideSecrets; right: SideSecrets }
+export interface SecretValuesInfo { sides: SideSecrets[] }
 
-export interface MissingSecretPath { side: 'LEFT' | 'RIGHT'; variable: string; path: string; file: string; line: number }
+export interface MissingSecretPath { side: number; variable: string; path: string; file: string; line: number }
 
 export interface EnvView {
   path: string
@@ -413,47 +425,27 @@ export interface EnvView {
   scopePath: string
   pathIsFile: boolean
   files: string[]
-  leftName: string
-  rightName: string
-  leftLabel?: string
-  rightLabel?: string
+  sides: SideInfo[]
+  /** The compared folders. */
+  shown: number[]
   rows: EnvRow[]
   summary: {
     total: number
-    common: number
-    leftOnly: number
-    rightOnly: number
+    complete: number
+    partial: number
+    missing: number[]
     similarNames: number
     same: number
     valueDiffers: number
     unverified: number
     sourceChanged: number
     duplicates: number
-    left: number
-    right: number
+    counts: number[]
   }
   secrets: {
-    left: SideSecrets
-    right: SideSecrets
+    sides: SideSecrets[]
     referenced: number
     resolved: number
     missing: MissingSecretPath[]
   }
-}
-
-export interface FileView {
-  path: string
-  name: string
-  status: FolderStatus
-  reason: string
-  leftState: SideState
-  rightState: SideState
-  binary: boolean
-  leftLines?: string[]
-  rightLines?: string[]
-  differences: LogicalDiff[]
-  leftName: string
-  rightName: string
-  leftLabel?: string
-  rightLabel?: string
 }

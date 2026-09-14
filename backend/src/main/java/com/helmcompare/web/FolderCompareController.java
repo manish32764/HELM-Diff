@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 
 @RestController
@@ -32,14 +33,19 @@ public class FolderCompareController {
         this.export = export;
     }
 
+    /** Two or three folders: side0, side1, side2 with optional label0… and secrets0… (AKeyless values JSON). */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public FolderCompare.Info create(@RequestParam(value = "left", required = false) List<MultipartFile> left,
-                                     @RequestParam(value = "right", required = false) List<MultipartFile> right,
-                                     @RequestParam(required = false) String leftLabel,
-                                     @RequestParam(required = false) String rightLabel,
-                                     @RequestParam(value = "leftSecrets", required = false) List<MultipartFile> leftSecrets,
-                                     @RequestParam(value = "rightSecrets", required = false) List<MultipartFile> rightSecrets) {
-        return service.create(left, right, leftLabel, rightLabel, leftSecrets, rightSecrets);
+    public FolderCompare.Info create(@RequestParam(value = "side0", required = false) List<MultipartFile> side0,
+                                     @RequestParam(value = "side1", required = false) List<MultipartFile> side1,
+                                     @RequestParam(value = "side2", required = false) List<MultipartFile> side2,
+                                     @RequestParam(required = false) String label0,
+                                     @RequestParam(required = false) String label1,
+                                     @RequestParam(required = false) String label2,
+                                     @RequestParam(value = "secrets0", required = false) List<MultipartFile> secrets0,
+                                     @RequestParam(value = "secrets1", required = false) List<MultipartFile> secrets1,
+                                     @RequestParam(value = "secrets2", required = false) List<MultipartFile> secrets2) {
+        return service.create(Arrays.asList(side0, side1, side2), Arrays.asList(label0, label1, label2),
+                Arrays.asList(secrets0, secrets1, secrets2));
     }
 
     @GetMapping
@@ -57,18 +63,21 @@ public class FolderCompareController {
         return service.file(id, path);
     }
 
+    /** @param sides the folders to compare, e.g. "0,2"; all when omitted */
     @GetMapping("/{id}/env")
     public FolderCompareService.EnvView env(@PathVariable String id, @RequestParam(defaultValue = "") String path,
-                                            @RequestParam(defaultValue = "FILE") String scope) {
-        return service.envVars(id, path, scope);
+                                            @RequestParam(defaultValue = "FILE") String scope,
+                                            @RequestParam(required = false) String sides) {
+        return service.envVars(id, path, scope, sides);
     }
 
     @GetMapping("/{id}/env/export")
     public ResponseEntity<byte[]> envExport(@PathVariable String id, @RequestParam(defaultValue = "") String path,
                                             @RequestParam(defaultValue = "FILE") String scope,
                                             @RequestParam(defaultValue = "xlsx") String format,
-                                            @RequestParam(defaultValue = "false") boolean showSecrets) {
-        return download(export.envExport(id, path, scope, format, showSecrets));
+                                            @RequestParam(defaultValue = "false") boolean showSecrets,
+                                            @RequestParam(required = false) String sides) {
+        return download(export.envExport(id, path, scope, format, showSecrets, sides));
     }
 
     @GetMapping("/{id}/secret-values")
@@ -76,17 +85,21 @@ public class FolderCompareController {
         return service.secretValuesInfo(id);
     }
 
-    /** JSON with the actual value of each AKeyless path; several files are merged unless {@code replace}. */
+    /**
+     * JSON with the actual value of each AKeyless path; several files are merged unless {@code replace}.
+     *
+     * @param side a side number, or all
+     */
     @PostMapping(value = "/{id}/secret-values", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FolderCompareService.SecretValuesInfo uploadSecretValues(@PathVariable String id,
                                                                     @RequestParam("file") List<MultipartFile> file,
-                                                                    @RequestParam(defaultValue = "both") String side,
+                                                                    @RequestParam(defaultValue = "all") String side,
                                                                     @RequestParam(defaultValue = "false") boolean replace) {
         return service.uploadSecretValues(id, side, file, replace);
     }
 
     @DeleteMapping("/{id}/secret-values")
-    public void clearSecretValues(@PathVariable String id, @RequestParam(defaultValue = "both") String side) {
+    public void clearSecretValues(@PathVariable String id, @RequestParam(defaultValue = "all") String side) {
         service.clearSecretValues(id, side);
     }
 
@@ -96,8 +109,9 @@ public class FolderCompareController {
     }
 
     @GetMapping("/{id}/export")
-    public ResponseEntity<byte[]> export(@PathVariable String id, @RequestParam(defaultValue = "xlsx") String format) {
-        return download(export.export(id, format));
+    public ResponseEntity<byte[]> export(@PathVariable String id, @RequestParam(defaultValue = "xlsx") String format,
+                                         @RequestParam(required = false) String sides) {
+        return download(export.export(id, format, sides));
     }
 
     private static ResponseEntity<byte[]> download(ExportService.Export e) {
